@@ -1,0 +1,9 @@
+/* WeChat Hub Console — Styles Entrypoint (v2)
+ *
+ * Composes the four CSS slices so legacy entrypoints remain valid.
+ */
+
+@import url("./css/tokens.css");
+@import url("./css/base.css");
+@import url("./css/layout.css");
+@import url("./css/components.css");

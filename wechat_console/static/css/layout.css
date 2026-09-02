@@ -1,0 +1,536 @@
+/* WeChat Hub Console — app shell and page layout (v2)
+ *
+ * Screen adaptation ladder
+ * ------------------------
+ *   ≥1600px  wide desktop / 4K panel — content column grows, split view 30/70
+ *   1280px+  standard desktop        — persistent nav, split view 35/65
+ *   1024px+  small laptop            — persistent nav, tighter gutters
+ *    768px+  tablet                  — nav becomes an overlay drawer
+ *   <768px   phone                   — bottom tab bar, split views become pages
+ *   short landscape phone            — vertical rhythm compresses, dialogs scroll
+ *
+ * Gutters, nav width and container widths come from clamp() tokens, so sizes
+ * between these stops interpolate instead of snapping.
+ */
+
+.app {
+  display: grid;
+  grid-template-columns: var(--nav-width) minmax(0, 1fr);
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+/* --- Primary navigation ------------------------------------------------ */
+
+.nav {
+  position: sticky;
+  top: 0;
+  align-self: start;
+  height: 100vh;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  padding: var(--sp-5) var(--sp-3) var(--sp-4);
+  background: var(--bg-surface);
+  border-right: 1px solid var(--border);
+}
+
+.nav-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: 0 var(--sp-2);
+}
+
+.nav-mark {
+  width: 34px;
+  height: 34px;
+  flex: none;
+  border-radius: var(--r-md);
+  background: var(--brand);
+  color: var(--text-on-brand);
+  display: grid;
+  place-items: center;
+  font-size: 16px;
+  font-weight: var(--fw-semibold);
+}
+
+.nav-brand-text {
+  min-width: 0;
+}
+
+.nav-brand-name {
+  font-size: var(--fs-item-title);
+  line-height: 1.35;
+  font-weight: var(--fw-semibold);
+}
+
+.nav-brand-sub {
+  font-size: var(--fs-caption);
+  line-height: var(--lh-caption);
+  color: var(--text-secondary);
+}
+
+.nav-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  width: 100%;
+  min-height: var(--control-h);
+  padding: 7px var(--sp-3);
+  border-radius: var(--r-sm);
+  color: var(--text-primary);
+  font-size: var(--fs-body);
+  font-weight: var(--fw-medium);
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+
+.nav-item:hover {
+  background: var(--bg-hover);
+}
+
+.nav-item[aria-current="page"] {
+  background: var(--brand-soft);
+  color: var(--brand-text);
+}
+
+.nav-item .icon {
+  flex: none;
+  color: currentColor;
+}
+
+.nav-item-label {
+  flex: 1;
+  text-align: left;
+}
+
+.nav-badge {
+  flex: none;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: var(--r-pill);
+  background: var(--danger);
+  color: #fff;
+  font-size: 11px;
+  line-height: 20px;
+  font-weight: var(--fw-semibold);
+  text-align: center;
+}
+
+.nav-badge[data-tone="neutral"] {
+  background: var(--neutral-soft);
+  color: var(--text-secondary);
+}
+
+.nav-foot {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.nav-core-state {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-sm);
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  font-size: var(--fs-caption);
+  line-height: var(--lh-caption);
+  color: var(--text-secondary);
+}
+
+.nav-core-state[data-tone="bad"] {
+  background: var(--danger-soft);
+  border-color: var(--danger-border);
+  color: var(--danger-text);
+}
+
+/* --- Content column ---------------------------------------------------- */
+
+.content {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.topbar {
+  display: none;
+  align-items: center;
+  gap: var(--sp-3);
+  height: var(--topbar-height);
+  padding: 0 var(--gutter);
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+.topbar-title {
+  font-size: var(--fs-item-title);
+  line-height: var(--lh-item-title);
+  font-weight: var(--fw-semibold);
+  flex: 1;
+  min-width: 0;
+}
+
+.page {
+  flex: 1;
+  min-width: 0;
+  padding: var(--section-gap) var(--gutter) calc(var(--section-gap) * 2);
+}
+
+.page[hidden] {
+  display: none;
+}
+
+.page-inner {
+  max-width: var(--content-max);
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--section-gap);
+}
+
+.page-inner.wide {
+  max-width: var(--content-max-wide);
+}
+
+.page-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  flex-wrap: wrap;
+}
+
+.page-head-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+/* --- Open sections ----------------------------------------------------- */
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.section-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--sp-4);
+}
+
+.section-head-text {
+  min-width: 0;
+}
+
+.section-head p {
+  color: var(--text-secondary);
+  font-size: var(--fs-label);
+  line-height: var(--lh-label);
+  margin-top: 2px;
+}
+
+/* One elevation level only: a surface sits directly on the page. */
+.surface {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-1);
+}
+
+.surface-flush {
+  overflow: hidden;
+}
+
+/* --- Split view (messages / saved) ------------------------------------- */
+
+.split {
+  display: grid;
+  grid-template-columns: minmax(240px, 34%) minmax(0, 1fr);
+  /* Fill the viewport minus chrome, but never collapse below a usable height
+   * and never grow past the screen on a tall 4K panel. */
+  height: clamp(480px, calc(100dvh - 220px), 900px);
+}
+
+.split-side {
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.split-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.split-back {
+  display: none;
+}
+
+/* --- Settings layout ---------------------------------------------------- */
+
+.settings-layout {
+  display: grid;
+  grid-template-columns: clamp(180px, 16vw, 240px) minmax(0, 1fr);
+  gap: var(--section-gap);
+  align-items: start;
+}
+
+.settings-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  position: sticky;
+  top: var(--sp-6);
+}
+
+.settings-nav button {
+  text-align: left;
+  min-height: var(--control-h);
+  padding: 7px var(--sp-3);
+  border-radius: var(--r-sm);
+  font-size: var(--fs-body);
+  font-weight: var(--fw-medium);
+  color: var(--text-secondary);
+}
+
+.settings-nav button:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.settings-nav button[aria-current="true"] {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  padding: 6px calc(var(--sp-3) - 1px);
+}
+
+.settings-panels {
+  display: flex;
+  flex-direction: column;
+  gap: var(--section-gap);
+  min-width: 0;
+}
+
+/* --- Mobile tab bar ----------------------------------------------------- */
+
+.tabbar {
+  display: none;
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 30;
+  height: calc(var(--tabbar-height) + env(safe-area-inset-bottom, 0px));
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  background: var(--bg-surface);
+  border-top: 1px solid var(--border);
+}
+
+.tabbar-list {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  height: var(--tabbar-height);
+}
+
+.tabbar-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  font-size: var(--fs-caption);
+  line-height: 1.2;
+  font-weight: var(--fw-medium);
+  color: var(--text-secondary);
+  position: relative;
+}
+
+.tabbar-item[aria-current="page"] {
+  color: var(--brand-text);
+}
+
+.tabbar-item .tab-dot {
+  position: absolute;
+  top: 6px;
+  left: calc(50% + 8px);
+  width: 8px;
+  height: 8px;
+  border-radius: var(--r-pill);
+  background: var(--danger);
+}
+
+/* --- Navigation drawer scrim (tablet) ---------------------------------- */
+
+.nav-scrim {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: var(--bg-overlay);
+  animation: fade-in var(--dur-base) var(--ease);
+}
+
+body.nav-open .nav-scrim {
+  display: block;
+}
+
+/* ======================================================================= */
+/* Breakpoints                                                             */
+/* ======================================================================= */
+
+/* Wide desktop / 4K panel: give the split view more room for the thread and
+ * let the content column breathe rather than centring a narrow strip. */
+@media (min-width: 1600px) {
+  .split {
+    grid-template-columns: minmax(280px, 30%) minmax(0, 1fr);
+  }
+}
+
+/* Small laptop */
+@media (max-width: 1279px) {
+  .split {
+    grid-template-columns: minmax(220px, 35%) minmax(0, 65%);
+  }
+}
+
+/* Tablet: navigation becomes an overlay drawer */
+@media (max-width: 1023px) {
+  .app {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .topbar {
+    display: flex;
+  }
+
+  .nav {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 50;
+    width: min(300px, 84vw);
+    transform: translateX(-100%);
+    transition: transform var(--dur-slow) var(--ease-out);
+    box-shadow: var(--shadow-2);
+    padding-top: calc(var(--sp-5) + env(safe-area-inset-top, 0px));
+  }
+
+  body.nav-open .nav {
+    transform: translateX(0);
+  }
+
+  .settings-layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--sp-4);
+  }
+
+  .settings-nav {
+    position: static;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: var(--sp-2);
+  }
+
+  .settings-nav button {
+    padding-inline: var(--sp-4);
+  }
+
+  .split {
+    height: clamp(420px, calc(100dvh - 260px), 760px);
+  }
+}
+
+/* Phone */
+@media (max-width: 767px) {
+  .app {
+    padding-bottom: calc(var(--tabbar-height) + env(safe-area-inset-bottom, 0px));
+  }
+
+  .tabbar {
+    display: block;
+  }
+
+  .page-inner {
+    gap: var(--sp-5);
+  }
+
+  .page-head {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--sp-3);
+  }
+
+  .page-head-actions {
+    flex-wrap: wrap;
+  }
+
+  /* Split views collapse to one column with an explicit back step. */
+  .split {
+    grid-template-columns: minmax(0, 1fr);
+    height: auto;
+  }
+
+  .split-side {
+    border-right: none;
+  }
+
+  .split[data-pane="detail"] .split-side {
+    display: none;
+  }
+
+  .split[data-pane="list"] .split-main {
+    display: none;
+  }
+
+  .split-back {
+    display: inline-flex;
+  }
+
+  /* On a phone the thread should scroll with the page, not inside a short box. */
+  .split-main .thread {
+    min-height: 50dvh;
+  }
+}
+
+/* Short landscape (phone rotated, small NAS panel): reclaim vertical space. */
+@media (max-height: 560px) and (min-width: 768px) {
+  :root {
+    --section-gap: 16px;
+  }
+
+  .split {
+    height: clamp(320px, calc(100dvh - 150px), 620px);
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}

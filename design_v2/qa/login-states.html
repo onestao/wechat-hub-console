@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Login States QA — 8 态真渲染对照</title>
+    <script src="../../wechat_console/static/js/theme-boot.js"></script>
+    <script>
+      (function () {
+        var forced = new URLSearchParams(location.search).get("theme");
+        if (forced === "dark" || forced === "light") {
+          document.documentElement.dataset.theme = forced;
+          document.documentElement.dataset.themePreference = forced;
+        }
+      })();
+    </script>
+    <link rel="stylesheet" href="../../wechat_console/static/css/tokens.css" />
+    <link rel="stylesheet" href="../../wechat_console/static/css/base.css" />
+    <link rel="stylesheet" href="../../wechat_console/static/css/layout.css" />
+    <link rel="stylesheet" href="../../wechat_console/static/css/components.css" />
+    <style>
+      body {
+        background: var(--bg-page);
+        padding: 40px var(--gutter);
+      }
+      .qa-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
+        gap: 32px;
+        max-width: 1600px;
+        margin: 0 auto;
+      }
+      .qa-card {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .qa-card h3 {
+        font-size: var(--fs-item-title);
+        font-weight: var(--fw-semibold);
+        color: var(--text-secondary);
+      }
+      .qa-card .modal-shell {
+        border: 1px solid var(--border);
+        border-radius: var(--r-lg);
+        background: var(--bg-surface);
+        box-shadow: var(--shadow-2);
+        overflow: hidden;
+      }
+    </style>
+  </head>
+  <body>
+    <div style="max-width: 1600px; margin: 0 auto 32px; display: flex; align-items: center; justify-content: space-between;">
+      <div>
+        <h1 style="font-size: var(--fs-page-title); font-weight: var(--fw-semibold); margin-bottom: 4px;">登录流程 8 态真实渲染 QA</h1>
+        <p style="color: var(--text-secondary); font-size: var(--fs-body);">使用真实组件函数 <code>renderStage</code> 渲染 8 份后端 fixture payload。</p>
+      </div>
+      <div style="display: flex; gap: 8px;">
+        <a class="btn btn-secondary btn-sm" href="?theme=light">浅色模式</a>
+        <a class="btn btn-secondary btn-sm" href="?theme=dark">深色模式</a>
+      </div>
+    </div>
+
+    <div class="qa-grid" id="qaGridRoot"></div>
+
+    <script type="module">
+      import { mountIconSprite } from "../../wechat_console/static/js/icons.js";
+      import { renderStage } from "../../wechat_console/static/js/components/login-flow.js";
+
+      mountIconSprite(document);
+
+      const FIXTURES = [
+        {
+          id: "starting",
+          label: "A. 正在准备（骨架 + indeterminate）",
+          payload: { state: "starting", display_name: "工作微信", snapshot_available: false },
+        },
+        {
+          id: "waiting",
+          label: "B. 等待扫码（显示二维码画面）",
+          payload: { state: "waiting", display_name: "工作微信", snapshot_available: true },
+        },
+        {
+          id: "phone_confirm",
+          label: "C. 已扫描，等待手机确认",
+          payload: { state: "waiting", login_flow_state: "phone_confirm", display_name: "工作微信", snapshot_available: true },
+        },
+        {
+          id: "attention",
+          label: "D. 微信需要额外确认（安全验证）",
+          payload: { state: "attention", display_name: "工作微信", snapshot_available: true },
+        },
+        {
+          id: "online",
+          label: "E. 登录成功（已连接）",
+          payload: { state: "online", display_name: "工作微信" },
+        },
+        {
+          id: "stopped",
+          label: "F. 微信已停止",
+          payload: { state: "stopped", display_name: "工作微信" },
+        },
+        {
+          id: "error",
+          label: "G. 登录窗口暂时不可用 / 超时",
+          payload: { state: "error", login_flow_state: "error", login_flow_error: "微信可能仍在启动，或者登录流程已经超时。", display_name: "工作微信" },
+        },
+        {
+          id: "degraded",
+          label: "H. 微信服务异常（Agent 503）",
+          payload: { state: "online", agent_server_healthy: false, display_name: "工作微信" },
+        },
+      ];
+
+      const root = document.getElementById("qaGridRoot");
+
+      for (const item of FIXTURES) {
+        const card = document.createElement("div");
+        card.className = "qa-card";
+        card.id = `qa-${item.id}`;
+        card.innerHTML = `<h3>${item.label}</h3><div class="stage-holder"></div>`;
+        root.appendChild(card);
+
+        const holder = card.querySelector(".stage-holder");
+        renderStage(holder, item.payload);
+
+        // If it's a snapshot image in QA, replace placeholder src with mockup svg if not live
+        const img = holder.querySelector("#loginSnapshotImg");
+        if (img) {
+          img.src = item.id === "attention"
+            ? "../concepts/wechat-attention-window.svg"
+            : "../concepts/wechat-login-window.svg";
+          img.style.opacity = "1";
+        }
+      }
+    </script>
+  </body>
+</html>

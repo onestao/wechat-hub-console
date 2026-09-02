@@ -1,18 +1,18 @@
 FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    WECHAT_CORE_URL=http://wechat-core:8080 \
+    WECHAT_CONSOLE_RUNTIME_DIR=/data/wechat-console
 
 WORKDIR /app
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends fonts-noto-cjk fontconfig \
-    && rm -rf /var/lib/apt/lists/*
+# D intentionally has no Python package dependency on Core, EFB or Agent.
+# The upstream repository and LICENSE remain in this derived source tree; the
+# production Console image contains only the decoupled Console package.
+COPY wechat_console ./wechat_console
 
-RUN pip install --no-cache-dir pycryptodome==3.23.0 zstandard==0.25.0 Pillow==11.3.0
+EXPOSE 8078
+VOLUME ["/data/wechat-console"]
 
-COPY memory ./memory
-COPY web ./web
-COPY ai ./ai
-COPY status ./status
-COPY agent_console ./agent_console
+CMD ["python", "-m", "wechat_console.app", "--host", "0.0.0.0", "--port", "8078"]

@@ -1,0 +1,274 @@
+/* WeChat Hub Console — Design tokens (v2)
+ *
+ * Light-first, NAS-application feel. WeChat green is reserved for the primary
+ * action and positive state; it is never used as a decorative background wash.
+ *
+ * Theming
+ * -------
+ * The dark palette is defined exactly once, under `:root[data-theme="dark"]`.
+ * `js/theme-boot.js` resolves the effective theme before first paint and always
+ * materialises `data-theme="light|dark"` on <html>, so "follow the system" is a
+ * stored *preference*, not a second CSS palette. `color-scheme: light dark`
+ * keeps native controls correct even during that first paint.
+ *
+ * Screen adaptation
+ * -----------------
+ * Type, gutters and container widths are fluid via `clamp()` so a 4K panel gets
+ * a genuinely larger layout instead of a 1080px column in the middle of the
+ * screen, while a 360px phone still fits. Breakpoint-specific overrides live in
+ * layout.css; only the scale itself is defined here.
+ */
+
+:root {
+  /* Lets the UA pick dark form controls/scrollbars if the OS is dark, even
+   * before theme-boot.js has resolved a theme. */
+  color-scheme: light dark;
+
+  /* --- Surfaces ------------------------------------------------------- */
+  --bg-page: #f5f6f7;
+  --bg-surface: #ffffff;
+  --bg-subtle: #fafbfc;
+  --bg-sunken: #f0f2f4;
+  --bg-hover: #f2f3f5;
+  --bg-active: #eceef1;
+  --bg-overlay: rgba(23, 28, 36, 0.42);
+
+  /* --- Lines ---------------------------------------------------------- */
+  --border: #e7e9ec;
+  --border-strong: #d6dae0;
+
+  /* --- Text ----------------------------------------------------------- */
+  /* Contrast measured against --bg-page / --bg-surface. The taskbook's
+   * suggested #7D858F only reaches 3.45:1, which is thin for 13–14px Chinese
+   * body text, so secondary/tertiary ink is darkened while keeping the same
+   * neutral hue. See docs/WEBUI_DESIGN_V2.md §11 for the full table. */
+  --text-primary: #1f2329; /* 14.6 / 15.8 */
+  --text-secondary: #646c76; /*  4.9 /  5.3 */
+  --text-tertiary: #868e98; /*  3.1 /  3.3 — incidental only, see below */
+  --text-on-brand: #ffffff;
+
+  /* --- Semantic ------------------------------------------------------- */
+  /* Two variants per semantic colour:
+   *   --x        filled surfaces (primary button, switch track, brand mark)
+   *   --x-text   the colour used whenever the hue carries TEXT or an ICON on
+   *              a page/surface background, where the filled value would be
+   *              too light to read.
+   * `--brand` stays WeChat's #07C160 for identity; `prefers-contrast: more`
+   * swaps in a darker fill for users who ask the OS for stronger contrast. */
+  --brand: #07c160;
+  --brand-strong: #06ad56;
+  --brand-text: #04814a; /* 4.6 / 5.0 */
+  --brand-soft: #e9f8f0;
+  --brand-border: #bde9d1;
+
+  --danger: #d94b4b;
+  --danger-strong: #c33f3f;
+  --danger-text: #b33737; /* 5.5 / 6.0 */
+  --danger-soft: #fcedec;
+  --danger-border: #f2cfcd;
+
+  --warning: #c7831d;
+  --warning-text: #9a6412; /* 4.6 / 5.0 */
+  --warning-soft: #fdf4e5;
+  --warning-border: #ecd9b4;
+
+  --info: #3a72d8;
+  --info-text: #2c5cb4; /* 5.9 / 6.4 */
+  --info-soft: #eef4fe;
+  --info-border: #cddcf7;
+
+  --neutral-soft: #f0f2f4;
+  --neutral-border: #dfe3e8;
+
+  /* The WeChat login window is always a LIGHT screenshot. The plate stays
+   * white in both themes and the mat is kept near-white so letterbox bars
+   * (when the snapshot ratio differs from 3:4) never form a harsh dark/white
+   * edge. No filter or blend is ever applied — that could alter the QR or
+   * obscure a security-confirm button. */
+  --login-plate: #ffffff;
+  --login-mat: #eceef1;
+  --login-mat-border: #d6dae0;
+  --login-ink: #646c76;
+
+  /* --- Radius --------------------------------------------------------- */
+  --r-xs: 6px;
+  --r-sm: 8px;
+  --r-md: 10px;
+  --r-lg: 14px;
+  --r-pill: 999px;
+
+  /* --- Elevation (deliberately shallow) ------------------------------- */
+  --shadow-1: 0 1px 2px rgba(20, 26, 38, 0.06);
+  --shadow-2: 0 6px 20px rgba(20, 26, 38, 0.09);
+  --shadow-3: 0 20px 48px rgba(20, 26, 38, 0.18);
+
+  /* --- Spacing scale -------------------------------------------------- */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-7: 32px;
+  --sp-8: 40px;
+  --sp-9: 48px;
+
+  /* Page gutter and section rhythm scale with the viewport so a large panel
+   * does not look like a phone layout stretched out. */
+  --gutter: clamp(16px, 2.4vw, 40px);
+  --section-gap: clamp(20px, 2vw, 32px);
+
+  /* --- Typography ----------------------------------------------------- */
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC",
+    "Source Han Sans SC", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", "Courier New", monospace;
+
+  /* Fluid between phone and ~1600px, then held. Values are unitless-safe:
+   * the low end matches the 390px design, the high end the 1920px design. */
+  --fs-page-title: clamp(21px, 1.35vw + 15px, 28px);
+  --lh-page-title: 1.35;
+  --fs-section-title: clamp(16px, 0.4vw + 14.5px, 19px);
+  --lh-section-title: 1.5;
+  --fs-item-title: clamp(15px, 0.25vw + 14px, 16.5px);
+  --lh-item-title: 1.55;
+  --fs-body: clamp(14px, 0.22vw + 13.2px, 15.5px);
+  --lh-body: 1.6;
+  --fs-label: clamp(13px, 0.15vw + 12.4px, 14.5px);
+  --lh-label: 1.55;
+  --fs-caption: clamp(12px, 0.12vw + 11.5px, 13.5px);
+  --lh-caption: 1.5;
+  --fs-mono: clamp(12.5px, 0.1vw + 12px, 13.5px);
+  --lh-mono: 1.6;
+
+  --fw-regular: 400;
+  --fw-medium: 500;
+  --fw-semibold: 600;
+
+  /* --- Layout --------------------------------------------------------- */
+  --nav-width: clamp(200px, 15.5vw, 260px);
+  --topbar-height: 60px;
+  --content-max: clamp(720px, 78vw, 1180px);
+  --content-max-wide: clamp(880px, 92vw, 1560px);
+  --tabbar-height: 58px;
+  --drawer-width: min(440px, 92vw);
+  --dialog-width: min(560px, calc(100vw - 2 * var(--gutter)));
+  --login-frame-max: clamp(300px, 26vw, 420px);
+  /* Comfortable reading measure for empty-state / instruction copy. */
+  --prose-max: 42ch;
+
+  /* Touch targets: pointer-coarse environments get larger hit areas. */
+  --control-h: 36px;
+  --control-h-sm: 30px;
+  --control-h-lg: 42px;
+  --row-min-h: 44px;
+
+  /* --- Motion --------------------------------------------------------- */
+  --dur-fast: 120ms;
+  --dur-base: 160ms;
+  --dur-slow: 220ms;
+  --ease: cubic-bezier(0.2, 0.7, 0.3, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+
+  --focus-ring: 0 0 0 2px var(--bg-surface), 0 0 0 4px rgba(7, 193, 96, 0.45);
+}
+
+/* ===================================================================== */
+/* Dark palette — single definition. `data-theme` is always materialised   */
+/* by theme-boot.js, including when the preference is "follow the system". */
+/* ===================================================================== */
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg-page: #16181c;
+  --bg-surface: #1f2227;
+  --bg-subtle: #24272d;
+  --bg-sunken: #191c20;
+  --bg-hover: #282c33;
+  --bg-active: #2e333b;
+  --bg-overlay: rgba(0, 0, 0, 0.58);
+
+  --border: #2f343b;
+  --border-strong: #3c424b;
+
+  --text-primary: #e9ecf0; /* 15.0 / 13.5 */
+  --text-secondary: #9aa2ad; /*  6.9 /  6.2 */
+  --text-tertiary: #828a95; /*  4.6 /  3.9 */
+  /* A lifted green needs dark glyphs on top, not white. */
+  --text-on-brand: #10251a;
+
+  /* Brand is lifted so it keeps contrast against #1F2227; the light-mode
+   * #07C160 is too dark on a dark surface. */
+  --brand: #2ecc7a;
+  --brand-strong: #3ad98a;
+  --brand-text: #4fd894; /* 9.8 / 8.8 */
+  --brand-soft: #1b2c23;
+  --brand-border: #2c5a42;
+
+  --danger: #e97b7b;
+  --danger-strong: #f08f8f;
+  --danger-text: #f09a9a; /* 8.3 / 7.4 */
+  --danger-soft: #2e2020;
+  --danger-border: #58393a;
+
+  --warning: #dda23f;
+  --warning-text: #e8b45c; /* 9.4 / 8.4 */
+  --warning-soft: #2c2418;
+  --warning-border: #574526;
+
+  --info: #7ea6f0;
+  --info-text: #96b8f5; /* 8.9 / 8.0 */
+  --info-soft: #1d2635;
+  --info-border: #33456b;
+
+  --neutral-soft: #262a30;
+  --neutral-border: #363c44;
+
+  /* Plate stays white — the screenshot itself is light. The mat darkens just
+   * enough to sit on a dark dialog without glowing, while remaining light
+   * enough that letterbox bars read as part of the window, not as a hole. */
+  --login-mat: #cfd2d7;
+  --login-mat-border: #aeb3ba;
+
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-2: 0 6px 20px rgba(0, 0, 0, 0.45);
+  --shadow-3: 0 20px 48px rgba(0, 0, 0, 0.6);
+
+  --focus-ring: 0 0 0 2px var(--bg-surface), 0 0 0 4px rgba(46, 204, 122, 0.5);
+}
+
+/* Coarse pointers (touch panels, NAS wall tablets) get larger hit areas
+ * regardless of viewport width — a 1024px tablet is not a small desktop. */
+@media (pointer: coarse) {
+  :root {
+    --control-h: 42px;
+    --control-h-sm: 36px;
+    --control-h-lg: 48px;
+    --row-min-h: 48px;
+  }
+}
+
+/* Users asking the OS for more contrast get firmer lines, stronger secondary
+ * text, and — in light mode — a darker primary-button fill so white label text
+ * clears 4.5:1 instead of relying on WeChat's brand green alone. */
+@media (prefers-contrast: more) {
+  :root {
+    --border: #b9bfc7;
+    --border-strong: #8d949e;
+    --text-secondary: #565d66;
+    --text-tertiary: #646c76;
+    --brand: #04803f;
+    --brand-strong: #036b35;
+    --brand-text: #04753a;
+    --login-ink: #565d66;
+  }
+
+  :root[data-theme="dark"] {
+    --border: #4a515b;
+    --border-strong: #6f7783;
+    --text-secondary: #b6bdc6;
+    --text-tertiary: #9aa2ad;
+  }
+}

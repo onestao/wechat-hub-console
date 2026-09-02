@@ -1,0 +1,1679 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>WeChat Hub Console — 视觉概念 v2</title>
+    <script src="../../wechat_console/static/js/theme-boot.js"></script>
+    <script>
+      /* Concept board only: `?theme=dark|light` forces a theme for screenshots
+       * without writing the user's stored preference. */
+      (function () {
+        var forced = new URLSearchParams(location.search).get("theme");
+        if (forced === "dark" || forced === "light") {
+          document.documentElement.dataset.theme = forced;
+          document.documentElement.dataset.themePreference = forced;
+        }
+      })();
+    </script>
+    <link rel="stylesheet" href="../../wechat_console/static/css/tokens.css" />
+    <link rel="stylesheet" href="../../wechat_console/static/css/base.css" />
+    <link rel="stylesheet" href="../../wechat_console/static/css/layout.css" />
+    <link rel="stylesheet" href="../../wechat_console/static/css/components.css" />
+    <style>
+      /* Concept-board chrome only. Nothing here ships in the Console. */
+      body {
+        background: var(--bg-page);
+      }
+      .artboard {
+        display: none;
+      }
+      .artboard:target {
+        display: block;
+      }
+      body:not(:has(.artboard:target)) #index {
+        display: block;
+      }
+      #index {
+        display: none;
+        padding: 48px;
+        max-width: 900px;
+        margin: 0 auto;
+      }
+      #index h1 {
+        font-size: 26px;
+        font-weight: 600;
+        margin-bottom: 8px;
+      }
+      #index ol {
+        list-style: decimal;
+        padding-left: 24px;
+        margin-top: 16px;
+        color: var(--text-secondary);
+      }
+      #index li {
+        padding: 4px 0;
+      }
+      /* Design-system board */
+      .board {
+        padding: 40px 48px 64px;
+        max-width: 1180px;
+        margin: 0 auto;
+        display: flex;
+        flex-direction: column;
+        gap: 32px;
+      }
+      .board-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+        gap: 12px;
+      }
+      .swatch {
+        border: 1px solid var(--border);
+        border-radius: var(--r-md);
+        overflow: hidden;
+        background: var(--bg-surface);
+      }
+      .swatch .chip-color {
+        height: 56px;
+      }
+      .swatch .swatch-meta {
+        padding: 8px 12px;
+        font-size: 12px;
+        line-height: 18px;
+      }
+      .swatch .swatch-meta b {
+        display: block;
+        font-weight: 500;
+        color: var(--text-primary);
+      }
+      .swatch .swatch-meta span {
+        color: var(--text-secondary);
+        font-family: var(--font-mono);
+      }
+      .specimen {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        padding: 20px 24px;
+      }
+      .specimen-row {
+        display: flex;
+        align-items: baseline;
+        gap: 20px;
+        border-bottom: 1px dashed var(--border);
+        padding-bottom: 8px;
+      }
+      .specimen-row .spec-note {
+        color: var(--text-tertiary);
+        font-family: var(--font-mono);
+        font-size: 12px;
+        margin-left: auto;
+      }
+      /* Direction B experiment styles — intentionally denser. */
+      .dirb-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 16px;
+      }
+      .dirb-card {
+        background: var(--bg-surface);
+        border: 1px solid var(--border);
+        border-radius: var(--r-lg);
+        padding: 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        box-shadow: var(--shadow-1);
+      }
+      .dirb-metrics {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 12px;
+      }
+      .dirb-metric {
+        background: var(--bg-surface);
+        border: 1px solid var(--border);
+        border-radius: var(--r-md);
+        padding: 12px 14px;
+      }
+      .dirb-metric b {
+        display: block;
+        font-size: 22px;
+        line-height: 30px;
+        font-weight: 600;
+      }
+      .dirb-metric span {
+        font-size: 12px;
+        color: var(--text-secondary);
+      }
+      /* Phone frame for mobile artboards. Width tracks the viewport so the
+       * board can also be inspected at 360px without the frame itself
+       * overflowing and masking real layout problems. */
+      .phone {
+        width: min(390px, 100vw);
+        margin: 0 auto;
+        min-height: 844px;
+        background: var(--bg-page);
+        position: relative;
+        overflow: hidden;
+      }
+      .phone-modal {
+        display: grid;
+        place-items: center;
+        background: var(--bg-overlay);
+        padding: 16px;
+      }
+      .phone-dialog {
+        width: 100%;
+        max-width: 358px;
+        max-height: 812px;
+        background: var(--bg-surface);
+        border-radius: var(--r-lg);
+        box-shadow: var(--shadow-3);
+        overflow: hidden;
+      }
+    </style>
+  </head>
+  <body>
+    <section id="index">
+      <h1>WeChat Hub Console — 视觉概念 v2</h1>
+      <p class="muted">
+        每个概念屏都是独立可截图的画板。在地址栏加上 <code>#id</code> 打开对应画板。
+      </p>
+      <ol>
+        <li><a href="#system">system — 设计系统总览</a></li>
+        <li><a href="#dir-a">dir-a — 方向 A：清爽列表（选定）</a></li>
+        <li><a href="#dir-b">dir-b — 方向 B：分栏工作台（备选）</a></li>
+        <li><a href="#home">home — 首页（混合状态）</a></li>
+        <li><a href="#accounts">accounts — 微信账号页</a></li>
+        <li><a href="#accounts-empty">accounts-empty — 还没有添加微信</a></li>
+        <li><a href="#add-account">add-account — 添加微信向导</a></li>
+        <li><a href="#login-waiting">login-waiting — 扫码登录：等待扫码</a></li>
+        <li><a href="#login-confirm">login-confirm — 已扫描，等待手机确认</a></li>
+        <li><a href="#login-attention">login-attention — 需要安全确认</a></li>
+        <li><a href="#login-success">login-success — 登录成功</a></li>
+        <li><a href="#messages">messages — 消息（桌面双栏）</a></li>
+        <li><a href="#send-uncertain">send-uncertain — 发送结果未知</a></li>
+        <li><a href="#saved">saved — 收藏</a></li>
+        <li><a href="#automation">automation — 自动化（未启用）</a></li>
+        <li><a href="#settings">settings — 设置</a></li>
+        <li><a href="#diagnostics">diagnostics — 高级诊断</a></li>
+        <li><a href="#core-offline">core-offline — WeChat Hub 无法连接</a></li>
+        <li><a href="#m-home">m-home — 手机首页</a></li>
+        <li><a href="#m-accounts">m-accounts — 手机微信账号管理</a></li>
+        <li><a href="#m-login">m-login — 手机扫码登录提示</a></li>
+        <li><a href="#dark-accounts">dark-accounts — 深色 · 微信账号页</a></li>
+        <li><a href="#dark-login">dark-login — 深色 · 扫码登录（登录画面保持浅色）</a></li>
+        <li><a href="#dark-system">dark-system — 深色 · 设计系统对照</a></li>
+      </ol>
+      <p class="caption" style="margin-top: 16px">
+        深色画板通过 <code>?theme=dark</code> 强制；实际应用默认「跟随系统」，
+        由 <code>js/theme-boot.js</code> 在首屏渲染前解析 <code>prefers-color-scheme</code>。
+      </p>
+    </section>
+
+    <!-- ================= 1. Design system board ================= -->
+    <section class="artboard" id="system">
+      <div class="board">
+        <div>
+          <div class="page-title">WeChat Hub Console 设计系统</div>
+          <p class="page-subtitle">
+            浅色基准、跟随系统切换深色、开放布局、单层容器。微信绿只用于主要动作与「已连接」正向状态。
+          </p>
+        </div>
+
+        <div class="section">
+          <div class="section-head">
+            <div class="section-head-text">
+              <h2 class="section-title">颜色</h2>
+              <p>填充值与文字值分开：<code>--x</code> 用于填充面，<code>--x-text</code> 用于承载文字/图标。</p>
+            </div>
+          </div>
+          <div class="board-grid">
+            <div class="swatch"><div class="chip-color" style="background: var(--bg-page)"></div><div class="swatch-meta"><b>页面背景</b><span>--bg-page</span></div></div>
+            <div class="swatch"><div class="chip-color" style="background: var(--bg-surface)"></div><div class="swatch-meta"><b>主内容</b><span>--bg-surface</span></div></div>
+            <div class="swatch"><div class="chip-color" style="background: var(--text-primary)"></div><div class="swatch-meta"><b>主要文字</b><span>--text-primary</span></div></div>
+            <div class="swatch"><div class="chip-color" style="background: var(--text-secondary)"></div><div class="swatch-meta"><b>次要文字 4.9:1</b><span>--text-secondary</span></div></div>
+            <div class="swatch"><div class="chip-color" style="background: var(--border)"></div><div class="swatch-meta"><b>边界</b><span>--border</span></div></div>
+            <div class="swatch"><div class="chip-color" style="background: var(--brand)"></div><div class="swatch-meta"><b>微信绿 · 填充</b><span>--brand</span></div></div>
+            <div class="swatch"><div class="chip-color" style="background: var(--brand-text)"></div><div class="swatch-meta"><b>微信绿 · 文字 4.6:1</b><span>--brand-text</span></div></div>
+            <div class="swatch"><div class="chip-color" style="background: var(--warning-text)"></div><div class="swatch-meta"><b>警告 · 文字</b><span>--warning-text</span></div></div>
+            <div class="swatch"><div class="chip-color" style="background: var(--danger-text)"></div><div class="swatch-meta"><b>危险 · 文字</b><span>--danger-text</span></div></div>
+            <div class="swatch"><div class="chip-color" style="background: var(--info-text)"></div><div class="swatch-meta"><b>进行中 · 文字</b><span>--info-text</span></div></div>
+          </div>
+          <p class="caption">
+            深色由 <code>:root[data-theme="dark"]</code> 单点覆盖，组件样式不分叉；
+            见 <a href="?theme=dark#dark-system">深色对照</a>。
+          </p>
+        </div>
+
+        <div class="section">
+          <div class="section-head">
+            <div class="section-head-text">
+              <h2 class="section-title">文字层级</h2>
+              <p>字号用 <code>clamp()</code> 在手机与约 1600px 之间插值；行高为无单位倍数。</p>
+            </div>
+          </div>
+          <div class="surface specimen">
+            <div class="specimen-row"><span class="page-title">页面标题 · 微信</span><span class="spec-note">21→28 · 1.35 · 600</span></div>
+            <div class="specimen-row"><span class="section-title">分区标题 · 我的微信</span><span class="spec-note">16→19 · 1.5 · 600</span></div>
+            <div class="specimen-row"><span class="item-title">条目标题 · 工作微信</span><span class="spec-note">15→16.5 · 1.55 · 500</span></div>
+            <div class="specimen-row"><span>正文 · 请使用手机微信扫描窗口中的二维码。</span><span class="spec-note">14→15.5 · 1.6 · 400</span></div>
+            <div class="specimen-row"><span class="label">标签 · 运行模式</span><span class="spec-note">13→14.5 · 1.55 · 500</span></div>
+            <div class="specimen-row"><span class="caption">辅助说明 · 登录画面只在当前会话中临时显示。</span><span class="spec-note">12→13.5 · 1.5 · 400</span></div>
+            <div class="specimen-row"><span class="mono">技术信息 · account_id=work · runtime_provider=agent_wechat</span><span class="spec-note">12.5→13.5 · mono</span></div>
+          </div>
+        </div>
+
+        <div class="section">
+          <div class="section-head">
+            <div class="section-head-text"><h2 class="section-title">按钮与状态</h2></div>
+          </div>
+          <div class="surface specimen">
+            <div class="specimen-row" style="gap: 12px; flex-wrap: wrap">
+              <button class="btn btn-primary">扫码登录</button>
+              <button class="btn btn-secondary">打开微信</button>
+              <button class="btn btn-ghost">刷新</button>
+              <button class="btn btn-danger">移除微信</button>
+              <button class="btn btn-secondary btn-sm">重新启动</button>
+              <button class="btn btn-primary" disabled>正在启动</button>
+              <span class="spec-note">btn / primary · secondary · ghost · danger</span>
+            </div>
+            <div class="specimen-row" style="gap: 20px; flex-wrap: wrap">
+              <span class="status" data-tone="good"><span class="status-glyph"></span>已连接</span>
+              <span class="status" data-tone="warn"><span class="status-glyph"></span>等待登录</span>
+              <span class="status" data-tone="busy"><span class="status-glyph"></span>正在启动</span>
+              <span class="status" data-tone="idle"><span class="status-glyph"></span>已停止</span>
+              <span class="status" data-tone="bad"><span class="status-glyph"></span>微信服务异常</span>
+              <span class="spec-note">形状 + 文案，不只靠颜色</span>
+            </div>
+            <div class="specimen-row" style="gap: 12px; flex-wrap: wrap">
+              <span class="pill" data-tone="brand">推荐模式（Beta）</span>
+              <span class="pill">兼容模式</span>
+              <span class="pill" data-tone="info">自动启动</span>
+              <span class="pill" data-tone="warn">需要处理</span>
+              <span class="spec-note">pill · 次级说明</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="section">
+          <div class="section-head">
+            <div class="section-head-text"><h2 class="section-title">列表行结构（产品核心组件）</h2></div>
+          </div>
+          <div class="surface surface-flush">
+            <div class="rows">
+              <div class="row">
+                <div class="avatar" data-tone="good">工</div>
+                <div class="row-body">
+                  <div class="row-title"><strong>工作微信</strong><span class="pill" data-tone="brand">推荐模式（Beta）</span></div>
+                  <div class="row-meta"><span class="status" data-tone="good"><span class="status-glyph"></span>已连接</span><span>今天 09:21 登录</span></div>
+                </div>
+                <div class="row-actions">
+                  <button class="btn btn-secondary">打开微信</button>
+                  <button class="btn btn-icon" aria-label="更多操作"><svg class="icon" aria-hidden="true"><use href="#i-more"></use></svg></button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <p class="caption">
+            头像 / 名称 + 能力标记 / 用户状态 + 最近活动 / 一个主要操作 / <code>···</code> 收纳低频操作。
+          </p>
+        </div>
+
+        <div class="section">
+          <div class="section-head">
+            <div class="section-head-text"><h2 class="section-title">间距 · 圆角 · 动效 · 自适应</h2></div>
+          </div>
+          <div class="surface specimen">
+            <div class="specimen-row"><span>间距刻度 4 / 8 / 12 / 16 / 20 / 24 / 32 / 40 / 48</span><span class="spec-note">--sp-1 … --sp-9</span></div>
+            <div class="specimen-row"><span>页面留白与分区节奏随视口伸缩</span><span class="spec-note">--gutter · --section-gap</span></div>
+            <div class="specimen-row"><span>圆角 6 / 8 / 10 / 14 / pill</span><span class="spec-note">--r-xs … --r-pill</span></div>
+            <div class="specimen-row"><span>阴影仅 3 级，主要依赖背景层级与 1px 边界</span><span class="spec-note">--shadow-1 … 3</span></div>
+            <div class="specimen-row"><span>控件热区按输入方式放大，不按视口宽度</span><span class="spec-note">@media (pointer: coarse)</span></div>
+            <div class="specimen-row"><span>高度用 dvh，移动端地址栏收起时不跳版</span><span class="spec-note">100dvh</span></div>
+            <div class="specimen-row"><span>Dialog 160ms fade+scale · Drawer 220ms slide · 状态切换淡入</span><span class="spec-note">prefers-reduced-motion 已支持</span></div>
+            <div class="specimen-row"><span>主题跟随系统，首屏前解析，切换无需刷新</span><span class="spec-note">prefers-color-scheme + theme-boot.js</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= 2. Direction A (chosen) ================= -->
+    <section class="artboard" id="dir-a">
+      <div class="app" data-shell="desktop" data-active="home">
+        <main class="content">
+          <div class="page">
+            <div class="page-inner">
+              <div class="page-head">
+                <div>
+                  <div class="page-title">方向 A · 清爽列表</div>
+                  <p class="page-subtitle">开放分区 + 列表行；每个微信一行、一个状态、一个主要操作。</p>
+                </div>
+              </div>
+
+              <div class="section">
+                <div class="section-head">
+                  <div class="section-head-text"><h2 class="section-title">我的微信</h2></div>
+                </div>
+                <div class="surface surface-flush">
+                  <div class="rows">
+                    <div class="row">
+                      <div class="avatar" data-tone="good">个</div>
+                      <div class="row-body">
+                        <div class="row-title"><strong>个人微信</strong></div>
+                        <div class="row-meta"><span class="status" data-tone="good"><span class="status-glyph"></span>已连接</span><span>今天收到 12 条消息</span></div>
+                      </div>
+                      <div class="row-actions"><button class="btn btn-secondary">查看消息</button></div>
+                    </div>
+                    <div class="row">
+                      <div class="avatar" data-tone="warn">工</div>
+                      <div class="row-body">
+                        <div class="row-title"><strong>工作微信</strong></div>
+                        <div class="row-meta"><span class="status" data-tone="warn"><span class="status-glyph"></span>等待登录</span></div>
+                      </div>
+                      <div class="row-actions"><button class="btn btn-primary">扫码登录</button></div>
+                    </div>
+                    <div class="row">
+                      <div class="avatar">备</div>
+                      <div class="row-body">
+                        <div class="row-title"><strong>备用微信</strong></div>
+                        <div class="row-meta"><span class="status" data-tone="idle"><span class="status-glyph"></span>已停止</span></div>
+                      </div>
+                      <div class="row-actions"><button class="btn btn-secondary">启动</button></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <p class="caption">
+                优点：普通用户一眼看到「哪个微信需要我做什么」；没有指标卡片、没有工程字段；移动端天然可折行。
+              </p>
+            </div>
+          </div>
+        </main>
+      </div>
+    </section>
+
+    <!-- ================= 3. Direction B (rejected) ================= -->
+    <section class="artboard" id="dir-b">
+      <div class="app" data-shell="desktop" data-active="home">
+        <main class="content">
+          <div class="page">
+            <div class="page-inner wide">
+              <div class="page-head">
+                <div>
+                  <div class="page-title">方向 B · 分栏工作台</div>
+                  <p class="page-subtitle">指标条 + 账号卡片矩阵；信息密度更高，更接近传统管理后台。</p>
+                </div>
+              </div>
+
+              <div class="dirb-metrics">
+                <div class="dirb-metric"><b>3</b><span>微信账号</span></div>
+                <div class="dirb-metric"><b>1</b><span>需要登录</span></div>
+                <div class="dirb-metric"><b>128</b><span>今日消息</span></div>
+                <div class="dirb-metric"><b>2</b><span>自动化任务</span></div>
+              </div>
+
+              <div class="dirb-grid">
+                <div class="dirb-card">
+                  <div class="row-title"><strong class="item-title">个人微信</strong><span class="pill" data-tone="brand">推荐模式</span></div>
+                  <span class="status" data-tone="good"><span class="status-glyph"></span>已连接</span>
+                  <p class="caption">今天收到 12 条消息 · 09:21 登录</p>
+                  <div class="row-actions"><button class="btn btn-secondary btn-sm">查看消息</button><button class="btn btn-ghost btn-sm">打开微信</button></div>
+                </div>
+                <div class="dirb-card">
+                  <div class="row-title"><strong class="item-title">工作微信</strong><span class="pill" data-tone="brand">推荐模式</span></div>
+                  <span class="status" data-tone="warn"><span class="status-glyph"></span>等待登录</span>
+                  <p class="caption">上次登录 8 月 30 日</p>
+                  <div class="row-actions"><button class="btn btn-primary btn-sm">扫码登录</button><button class="btn btn-ghost btn-sm">详情</button></div>
+                </div>
+                <div class="dirb-card">
+                  <div class="row-title"><strong class="item-title">备用微信</strong><span class="pill">兼容模式</span></div>
+                  <span class="status" data-tone="idle"><span class="status-glyph"></span>已停止</span>
+                  <p class="caption">未运行</p>
+                  <div class="row-actions"><button class="btn btn-secondary btn-sm">启动</button><button class="btn btn-ghost btn-sm">详情</button></div>
+                </div>
+              </div>
+
+              <p class="caption">
+                问题：指标条对家庭 NAS 场景没有决策价值；卡片矩阵把「下一步做什么」摊平成同等权重，
+                横向空间浪费，移动端还要退回一列。故不采用。
+              </p>
+            </div>
+          </div>
+        </main>
+      </div>
+    </section>
+
+    <!-- ================= 4. Home ================= -->
+    <section class="artboard" id="home">
+      <div class="app" data-shell="desktop" data-active="home">
+        <main class="content">
+          <div class="page">
+            <div class="page-inner">
+              <div class="page-head">
+                <div>
+                  <div class="page-title">首页</div>
+                  <p class="page-subtitle">这台 NAS 上的微信现在怎么样。</p>
+                </div>
+              </div>
+
+              <div class="section">
+                <div class="section-head">
+                  <div class="section-head-text"><h2 class="section-title">需要处理</h2></div>
+                </div>
+                <div class="banner">
+                  <svg class="icon banner-icon" aria-hidden="true"><use href="#i-alertTriangle"></use></svg>
+                  <div class="banner-body">
+                    <div class="banner-title">工作微信需要重新登录</div>
+                    <div class="banner-text">微信已经启动，等待手机扫码。</div>
+                  </div>
+                  <div class="banner-actions"><button class="btn btn-primary btn-sm">去登录</button></div>
+                </div>
+              </div>
+
+              <div class="section">
+                <div class="section-head">
+                  <div class="section-head-text"><h2 class="section-title">我的微信</h2></div>
+                  <button class="btn btn-ghost btn-sm">全部管理<svg class="icon icon-sm" aria-hidden="true"><use href="#i-chevronRight"></use></svg></button>
+                </div>
+                <div class="surface surface-flush">
+                  <div class="rows">
+                    <div class="row">
+                      <div class="avatar" data-tone="good">个</div>
+                      <div class="row-body">
+                        <div class="row-title"><strong>个人微信</strong></div>
+                        <div class="row-meta"><span class="status" data-tone="good"><span class="status-glyph"></span>已连接</span><span>今天收到 12 条消息</span></div>
+                      </div>
+                      <div class="row-actions"><button class="btn btn-secondary">查看消息</button></div>
+                    </div>
+                    <div class="row">
+                      <div class="avatar" data-tone="warn">工</div>
+                      <div class="row-body">
+                        <div class="row-title"><strong>工作微信</strong></div>
+                        <div class="row-meta"><span class="status" data-tone="warn"><span class="status-glyph"></span>等待登录</span></div>
+                      </div>
+                      <div class="row-actions"><button class="btn btn-primary">扫码登录</button></div>
+                    </div>
+                    <div class="row">
+                      <div class="avatar">备</div>
+                      <div class="row-body">
+                        <div class="row-title"><strong>备用微信</strong></div>
+                        <div class="row-meta"><span class="status" data-tone="idle"><span class="status-glyph"></span>已停止</span></div>
+                      </div>
+                      <div class="row-actions"><button class="btn btn-secondary">启动</button></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="section">
+                <div class="section-head">
+                  <div class="section-head-text"><h2 class="section-title">最近消息</h2></div>
+                  <button class="btn btn-ghost btn-sm">打开消息<svg class="icon icon-sm" aria-hidden="true"><use href="#i-chevronRight"></use></svg></button>
+                </div>
+                <div class="surface surface-flush">
+                  <div class="rows">
+                    <div class="row">
+                      <div class="avatar avatar-sm">A</div>
+                      <div class="row-body">
+                        <div class="row-title"><strong>Alice</strong><span class="caption">个人微信</span></div>
+                        <div class="row-meta"><span class="truncate">下午三点的会议还开吗？我这边随时可以。</span></div>
+                      </div>
+                      <span class="caption">09:41</span>
+                    </div>
+                    <div class="row">
+                      <div class="avatar avatar-sm">研</div>
+                      <div class="row-body">
+                        <div class="row-title"><strong>课题组大群</strong><span class="caption">个人微信</span></div>
+                        <div class="row-meta"><span class="truncate">[图片] 实验数据.png</span></div>
+                      </div>
+                      <span class="caption">09:12</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </main>
+      </div>
+    </section>
+
+    <!-- ================= 5. Accounts ================= -->
+    <section class="artboard" id="accounts">
+      <div class="app" data-shell="desktop" data-active="accounts">
+        <main class="content">
+          <div class="page">
+            <div class="page-inner">
+              <div class="page-head">
+                <div>
+                  <div class="page-title">微信</div>
+                  <p class="page-subtitle">管理运行在这台 NAS 上的微信账号。</p>
+                </div>
+                <div class="page-head-actions">
+                  <button class="btn btn-ghost btn-sm" aria-label="刷新状态"><svg class="icon icon-sm" aria-hidden="true"><use href="#i-refresh"></use></svg>刷新</button>
+                  <button class="btn btn-primary"><svg class="icon icon-sm" aria-hidden="true"><use href="#i-plus"></use></svg>添加微信</button>
+                </div>
+              </div>
+
+              <div class="surface surface-flush">
+                <div class="rows">
+                  <div class="row">
+                    <div class="avatar" data-tone="good">个</div>
+                    <div class="row-body">
+                      <div class="row-title"><strong>个人微信</strong><span class="pill" data-tone="brand">推荐模式（Beta）</span></div>
+                      <div class="row-meta"><span class="status" data-tone="good"><span class="status-glyph"></span>已连接</span><span>今天 09:21 登录</span></div>
+                    </div>
+                    <div class="row-actions">
+                      <button class="btn btn-secondary">打开微信</button>
+                      <button class="btn btn-icon" aria-label="个人微信的更多操作"><svg class="icon" aria-hidden="true"><use href="#i-more"></use></svg></button>
+                    </div>
+                  </div>
+                  <div class="row">
+                    <div class="avatar" data-tone="warn">工</div>
+                    <div class="row-body">
+                      <div class="row-title"><strong>工作微信</strong><span class="pill" data-tone="brand">推荐模式（Beta）</span></div>
+                      <div class="row-meta"><span class="status" data-tone="warn"><span class="status-glyph"></span>等待登录</span><span>微信已启动，等待扫码</span></div>
+                    </div>
+                    <div class="row-actions">
+                      <button class="btn btn-primary">扫码登录</button>
+                      <button class="btn btn-icon" aria-label="工作微信的更多操作"><svg class="icon" aria-hidden="true"><use href="#i-more"></use></svg></button>
+                    </div>
+                  </div>
+                  <div class="row">
+                    <div class="avatar">备</div>
+                    <div class="row-body">
+                      <div class="row-title"><strong>备用微信</strong><span class="pill">兼容模式</span></div>
+                      <div class="row-meta"><span class="status" data-tone="idle"><span class="status-glyph"></span>已停止</span><span>自动启动已关闭</span></div>
+                    </div>
+                    <div class="row-actions">
+                      <button class="btn btn-secondary">启动</button>
+                      <button class="btn btn-icon" aria-label="备用微信的更多操作"><svg class="icon" aria-hidden="true"><use href="#i-more"></use></svg></button>
+                    </div>
+                  </div>
+                  <div class="row">
+                    <div class="avatar" data-tone="bad">家</div>
+                    <div class="row-body">
+                      <div class="row-title"><strong>家人共享微信（长名称测试账号）</strong><span class="pill" data-tone="brand">推荐模式（Beta）</span></div>
+                      <div class="row-meta"><span class="status" data-tone="bad"><span class="status-glyph"></span>微信服务异常</span><span>微信进程仍在运行，控制服务暂时不可用</span></div>
+                    </div>
+                    <div class="row-actions">
+                      <button class="btn btn-secondary">重新启动</button>
+                      <button class="btn btn-icon" aria-label="更多操作"><svg class="icon" aria-hidden="true"><use href="#i-more"></use></svg></button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="popover" style="position: static; width: 200px; margin-left: auto">
+                <div class="menu">
+                  <button class="menu-item"><svg class="icon icon-sm" aria-hidden="true"><use href="#i-refresh"></use></svg>重新启动</button>
+                  <button class="menu-item"><svg class="icon icon-sm" aria-hidden="true"><use href="#i-stop"></use></svg>停止运行</button>
+                  <button class="menu-item"><svg class="icon icon-sm" aria-hidden="true"><use href="#i-qr"></use></svg>重新登录</button>
+                  <button class="menu-item"><svg class="icon icon-sm" aria-hidden="true"><use href="#i-info"></use></svg>高级信息</button>
+                  <div class="menu-divider"></div>
+                  <button class="menu-item" data-tone="danger"><svg class="icon icon-sm" aria-hidden="true"><use href="#i-trash"></use></svg>移除微信</button>
+                </div>
+              </div>
+              <p class="caption" style="text-align: right">↑ <code>···</code> 展开后的低频操作</p>
+            </div>
+          </div>
+        </main>
+      </div>
+    </section>
+
+    <!-- ================= 6. Accounts empty ================= -->
+    <section class="artboard" id="accounts-empty">
+      <div class="app" data-shell="desktop" data-active="accounts">
+        <main class="content">
+          <div class="page">
+            <div class="page-inner">
+              <div class="page-head">
+                <div>
+                  <div class="page-title">微信</div>
+                  <p class="page-subtitle">管理运行在这台 NAS 上的微信账号。</p>
+                </div>
+              </div>
+              <div class="surface">
+                <div class="empty">
+                  <div class="empty-icon"><svg class="icon" aria-hidden="true"><use href="#i-wechat"></use></svg></div>
+                  <div class="empty-title">还没有添加微信</div>
+                  <p class="empty-text">添加第一个微信后，可以在这里扫码登录并管理消息。</p>
+                  <button class="btn btn-primary"><svg class="icon icon-sm" aria-hidden="true"><use href="#i-plus"></use></svg>添加微信</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </main>
+      </div>
+    </section>
+
+    <!-- ================= 7. Add account wizard ================= -->
+    <section class="artboard" id="add-account">
+      <div class="app" data-shell="desktop" data-active="accounts" data-dim="1"></div>
+      <div class="concept-modal">
+        <div class="modal-shell">
+          <div class="modal-head">
+            <div class="modal-head-text">
+              <div class="modal-title">添加微信</div>
+              <p class="modal-subtitle">起个名字就可以，其余设置由 WeChat Hub 自动准备。</p>
+            </div>
+            <button class="btn btn-icon" aria-label="关闭"><svg class="icon" aria-hidden="true"><use href="#i-close"></use></svg></button>
+          </div>
+          <div class="modal-body">
+            <div class="field">
+              <label class="label" for="c-name">给这个微信起一个名字</label>
+              <input class="input" id="c-name" value="工作微信" />
+              <p class="field-hint">只用于在 WeChat Hub 里区分不同微信，随时可以改。</p>
+            </div>
+            <div class="banner" data-tone="info">
+              <svg class="icon banner-icon" aria-hidden="true"><use href="#i-info"></use></svg>
+              <div class="banner-body">
+                <div class="banner-title">创建后会自动启动并进入扫码登录</div>
+                <div class="banner-text">默认使用推荐模式（Beta），每个微信独立运行，支持更多操作。</div>
+              </div>
+            </div>
+            <details class="disclosure" open>
+              <summary>高级选项</summary>
+              <div class="disclosure-body">
+                <div class="field">
+                  <label class="label" for="c-id">账号 ID</label>
+                  <input class="input mono" id="c-id" placeholder="留空自动生成，例如 wechat-2" />
+                  <p class="field-hint">Core / Telegram 集成使用的稳定标识，创建后不可更改。</p>
+                </div>
+                <div class="field">
+                  <label class="label" for="c-provider">运行模式</label>
+                  <select class="select" id="c-provider">
+                    <option>推荐模式（Beta）— AgentWechat</option>
+                    <option>兼容模式 — Legacy</option>
+                  </select>
+                  <p class="field-hint">推荐模式每个微信独立运行；兼容模式用于继续使用已有旧版微信数据。</p>
+                </div>
+                <label class="check"><input type="checkbox" checked /><span class="check-text"><strong>自动启动</strong><span>WeChat Hub 启动时一起启动这个微信。</span></span></label>
+                <label class="check"><input type="checkbox" checked /><span class="check-text"><strong>创建后立即启动并登录</strong><span>关闭后需要稍后手动启动。</span></span></label>
+              </div>
+            </details>
+          </div>
+          <div class="modal-foot">
+            <button class="btn btn-ghost">取消</button>
+            <button class="btn btn-primary">创建并登录</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= 8. Login — waiting for scan ================= -->
+    <section class="artboard" id="login-waiting">
+      <div class="app" data-shell="desktop" data-active="accounts" data-dim="1"></div>
+      <div class="concept-modal login-dialog">
+        <div class="modal-shell">
+          <div class="modal-head">
+            <div class="modal-head-text"><div class="modal-title">登录工作微信</div></div>
+            <button class="btn btn-icon" aria-label="关闭登录窗口"><svg class="icon" aria-hidden="true"><use href="#i-close"></use></svg></button>
+          </div>
+          <div class="modal-body">
+            <div class="login-stage">
+              <p class="login-instruction">请使用手机微信扫描窗口中的二维码。</p>
+              <div class="login-frame">
+                <img src="./wechat-login-window.svg" alt="微信登录窗口，使用手机微信扫描其中的二维码" />
+              </div>
+              <p class="login-note">登录画面只在当前会话中临时显示，不会保存。</p>
+            </div>
+          </div>
+          <div class="modal-foot">
+            <button class="btn btn-ghost btn-sm">刷新画面</button>
+            <div class="spacer"></div>
+            <button class="btn btn-secondary">打开完整微信</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= 9. Login — phone confirm ================= -->
+    <section class="artboard" id="login-confirm">
+      <div class="app" data-shell="desktop" data-active="accounts" data-dim="1"></div>
+      <div class="concept-modal login-dialog">
+        <div class="modal-shell">
+          <div class="modal-head">
+            <div class="modal-head-text"><div class="modal-title">登录工作微信</div></div>
+            <button class="btn btn-icon" aria-label="关闭登录窗口"><svg class="icon" aria-hidden="true"><use href="#i-close"></use></svg></button>
+          </div>
+          <div class="modal-body">
+            <div class="login-stage">
+              <div class="login-success-mark" style="background: var(--info-soft); border-color: var(--info-border); color: var(--info)">
+                <svg class="icon" aria-hidden="true" style="width: 26px; height: 26px"><use href="#i-check"></use></svg>
+              </div>
+              <div class="login-headline">已扫描二维码</div>
+              <p class="login-instruction">请在手机微信中确认登录。</p>
+              <div class="progress-indeterminate"></div>
+              <p class="login-note">该状态来自微信登录流程本身；如果手机上没有出现确认提示，可以刷新画面重试。</p>
+            </div>
+          </div>
+          <div class="modal-foot">
+            <button class="btn btn-ghost btn-sm">刷新画面</button>
+            <div class="spacer"></div>
+            <button class="btn btn-secondary">打开完整微信</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= 10. Login — attention ================= -->
+    <section class="artboard" id="login-attention">
+      <div class="app" data-shell="desktop" data-active="accounts" data-dim="1"></div>
+      <div class="concept-modal login-dialog">
+        <div class="modal-shell">
+          <div class="modal-head">
+            <div class="modal-head-text"><div class="modal-title">登录工作微信</div></div>
+            <button class="btn btn-icon" aria-label="关闭登录窗口"><svg class="icon" aria-hidden="true"><use href="#i-close"></use></svg></button>
+          </div>
+          <div class="modal-body">
+            <div class="login-stage">
+              <div class="banner" style="width: 100%; text-align: left">
+                <svg class="icon banner-icon" aria-hidden="true"><use href="#i-alertTriangle"></use></svg>
+                <div class="banner-body">
+                  <div class="banner-title">微信需要额外确认</div>
+                  <div class="banner-text">请在下面的微信窗口中完成安全验证。</div>
+                </div>
+              </div>
+              <div class="login-frame">
+                <img src="./wechat-attention-window.svg" alt="微信安全验证窗口，请在窗口中完成验证" />
+              </div>
+              <p class="login-note">画面完整显示，不做裁切，避免遮挡确认按钮。</p>
+            </div>
+          </div>
+          <div class="modal-foot">
+            <button class="btn btn-ghost btn-sm">刷新画面</button>
+            <div class="spacer"></div>
+            <button class="btn btn-primary">打开完整微信</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= 11. Login — success ================= -->
+    <section class="artboard" id="login-success">
+      <div class="app" data-shell="desktop" data-active="accounts" data-dim="1"></div>
+      <div class="concept-modal login-dialog">
+        <div class="modal-shell">
+          <div class="modal-head">
+            <div class="modal-head-text"><div class="modal-title">登录工作微信</div></div>
+            <button class="btn btn-icon" aria-label="关闭登录窗口"><svg class="icon" aria-hidden="true"><use href="#i-close"></use></svg></button>
+          </div>
+          <div class="modal-body">
+            <div class="login-stage" style="padding: 24px 0">
+              <div class="login-success-mark"><svg class="icon" aria-hidden="true" style="width: 26px; height: 26px"><use href="#i-check"></use></svg></div>
+              <div class="login-headline">工作微信已连接</div>
+              <p class="login-instruction">消息正在开始同步。以后 WeChat Hub 会自动启动这个微信。</p>
+            </div>
+          </div>
+          <div class="modal-foot">
+            <div class="spacer"></div>
+            <button class="btn btn-primary">完成</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= 12. Messages ================= -->
+    <section class="artboard" id="messages">
+      <div class="app" data-shell="desktop" data-active="messages">
+        <main class="content">
+          <div class="page">
+            <div class="page-inner wide">
+              <div class="page-head">
+                <div>
+                  <div class="page-title">消息</div>
+                  <p class="page-subtitle">查看并回复已同步的微信消息。</p>
+                </div>
+                <div class="page-head-actions">
+                  <button class="btn btn-secondary btn-sm">工作微信<svg class="icon icon-sm" aria-hidden="true"><use href="#i-chevronRight"></use></svg></button>
+                </div>
+              </div>
+
+              <div class="surface surface-flush">
+                <div class="split">
+                  <div class="split-side">
+                    <div style="padding: 12px 16px; border-bottom: 1px solid var(--border)">
+                      <div class="search"><svg class="icon icon-sm" aria-hidden="true"><use href="#i-search"></use></svg><input class="input" placeholder="搜索会话" /></div>
+                    </div>
+                    <div class="chat-list scroll-y">
+                      <button class="chat-item" aria-selected="true">
+                        <span class="avatar avatar-sm">A</span>
+                        <span class="chat-item-body"><span class="chat-item-name">Alice</span><span class="chat-item-meta">下午三点的会议还开吗？</span></span>
+                      </button>
+                      <button class="chat-item">
+                        <span class="avatar avatar-sm">工</span>
+                        <span class="chat-item-body"><span class="chat-item-name">工作群</span><span class="chat-item-meta">[图片] 实验数据.png</span></span>
+                      </button>
+                      <button class="chat-item">
+                        <span class="avatar avatar-sm">客</span>
+                        <span class="chat-item-body"><span class="chat-item-name">客户群</span><span class="chat-item-meta">收到，谢谢。</span></span>
+                      </button>
+                    </div>
+                  </div>
+                  <div class="split-main">
+                    <div class="chat-toolbar">
+                      <div class="chat-toolbar-title">
+                        <div class="item-title">Alice</div>
+                        <div class="caption">单聊 · 24 条已同步消息</div>
+                      </div>
+                      <button class="btn btn-icon btn-sm" aria-label="筛选类型"><svg class="icon icon-sm" aria-hidden="true"><use href="#i-file"></use></svg></button>
+                      <button class="btn btn-icon btn-sm" aria-label="搜索消息"><svg class="icon icon-sm" aria-hidden="true"><use href="#i-search"></use></svg></button>
+                    </div>
+                    <div class="thread scroll-y">
+                      <div class="bubble-line">
+                        <span class="bubble-author">Alice · 09:41</span>
+                        <div class="bubble"><div class="bubble-text">下午三点的会议还开吗？我这边随时可以。</div></div>
+                      </div>
+                      <div class="bubble-line outgoing">
+                        <span class="bubble-author">我 · 09:43</span>
+                        <div class="bubble"><div class="bubble-text">三点可以，我把资料先发群里。</div></div>
+                        <div class="bubble-foot"><span>已发送</span></div>
+                      </div>
+                      <div class="bubble-line">
+                        <span class="bubble-author">Alice · 09:44</span>
+                        <div class="bubble">
+                          <div class="bubble-text">好的。
+另外这个文件你看一下。</div>
+                          <div class="bubble-attachment"><svg class="icon icon-sm" aria-hidden="true"><use href="#i-file"></use></svg><span>会议纪要.pdf</span><a href="#messages">预览</a></div>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="composer">
+                      <div class="composer-tools">
+                        <button class="btn btn-icon btn-sm" aria-label="发送图片"><svg class="icon icon-sm" aria-hidden="true"><use href="#i-image"></use></svg></button>
+                        <button class="btn btn-icon btn-sm" aria-label="发送文件"><svg class="icon icon-sm" aria-hidden="true"><use href="#i-file"></use></svg></button>
+                      </div>
+                      <div class="composer-input-row">
+                        <textarea class="textarea" rows="1" placeholder="输入消息…"></textarea>
+                        <button class="btn btn-primary">发送</button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <p class="caption">
+                媒体按钮按当前账号能力显示：兼容模式账号不展示图片 / 文件按钮，只保留文字发送。
+              </p>
+            </div>
+          </div>
+        </main>
+      </div>
+    </section>
+
+    <!-- ================= 13. Send uncertain ================= -->
+    <section class="artboard" id="send-uncertain">
+      <div class="app" data-shell="desktop" data-active="messages">
+        <main class="content">
+          <div class="page">
+            <div class="page-inner">
+              <div class="page-head">
+                <div><div class="page-title">发送状态</div><p class="page-subtitle">四种结果的用户表达；`发送结果未知` 单独设计。</p></div>
+              </div>
+
+              <div class="section">
+                <div class="surface" style="padding: 20px; display: flex; flex-direction: column; gap: 12px">
+                  <div class="send-result" data-state="sending">
+                    <span class="status" data-tone="busy"><span class="status-glyph"></span></span>
+                    <div class="send-result-body"><div class="send-result-title">发送中…</div></div>
+                  </div>
+                  <div class="send-result" data-state="sent">
+                    <svg class="icon" aria-hidden="true" style="color: var(--brand-strong)"><use href="#i-check"></use></svg>
+                    <div class="send-result-body"><div class="send-result-title">已发送</div></div>
+                  </div>
+                  <div class="send-result" data-state="failed">
+                    <svg class="icon" aria-hidden="true" style="color: var(--danger)"><use href="#i-alertCircle"></use></svg>
+                    <div class="send-result-body">
+                      <div class="send-result-title">发送失败</div>
+                      <div class="send-result-text">微信没有接收这条消息，可以重新发送。</div>
+                      <div class="send-result-actions"><button class="btn btn-secondary btn-sm">重新发送</button></div>
+                    </div>
+                  </div>
+                  <div class="send-result" data-state="uncertain">
+                    <svg class="icon" aria-hidden="true" style="color: var(--warning)"><use href="#i-alertTriangle"></use></svg>
+                    <div class="send-result-body">
+                      <div class="send-result-title">发送结果未知</div>
+                      <div class="send-result-text">
+                        微信可能已经收到这条消息。为避免重复发送，系统没有自动重试。
+                      </div>
+                      <div class="send-result-actions">
+                        <button class="btn btn-secondary btn-sm">查看消息</button>
+                        <button class="btn btn-ghost btn-sm">仍然重新发送</button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <p class="caption">
+                「仍然重新发送」是危险二次操作，点击后必须再确认一次；不使用红色失败样式，
+                避免用户以为一定没有发出去。
+              </p>
+            </div>
+          </div>
+        </main>
+      </div>
+    </section>
+
+    <!-- ================= 14. Saved ================= -->
+    <section class="artboard" id="saved">
+      <div class="app" data-shell="desktop" data-active="saved">
+        <main class="content">
+          <div class="page">
+            <div class="page-inner wide">
+              <div class="page-head">
+                <div><div class="page-title">收藏</div><p class="page-subtitle">重要消息的快照、注释和永久附件归档。</p></div>
+              </div>
+              <div class="chips">
+                <button class="chip" aria-pressed="true">全部</button>
+                <button class="chip">图片</button>
+                <button class="chip">文件</button>
+                <button class="chip">链接</button>
+                <button class="chip">带注释</button>
+              </div>
+              <div class="surface surface-flush">
+                <div class="split">
+                  <div class="split-side">
+                    <div style="padding: 12px 16px; border-bottom: 1px solid var(--border)">
+                      <div class="search"><svg class="icon icon-sm" aria-hidden="true"><use href="#i-search"></use></svg><input class="input" placeholder="搜索收藏" /></div>
+                    </div>
+                    <div class="chat-list scroll-y">
+                      <button class="chat-item" aria-selected="true">
+                        <span class="avatar avatar-sm"><svg class="icon icon-sm" aria-hidden="true"><use href="#i-image"></use></svg></span>
+                        <span class="chat-item-body"><span class="chat-item-name">实验数据图</span><span class="chat-item-meta">工作群 · 8月31日</span></span>
+                      </button>
+                      <button class="chat-item">
+                        <span class="avatar avatar-sm"><svg class="icon icon-sm" aria-hidden="true"><use href="#i-message"></use></svg></span>
+                        <span class="chat-item-body"><span class="chat-item-name">会议时间确认</span><span class="chat-item-meta">Alice · 8月30日</span></span>
+                      </button>
+                    </div>
+                  </div>
+                  <div class="split-main scroll-y" style="padding: 20px; gap: 16px">
+                    <div class="row-title"><strong class="item-title">实验数据图</strong></div>
+                    <p class="caption">个人微信 · 工作群 · 收藏于 2026/8/31 15:02</p>
+                    <div class="snapshot">
+                      <strong>Bob</strong>
+                      <span>[图片] 实验数据.png</span>
+                      <span class="caption mono">image · 2026/8/31 15:00 · beta-msg-1</span>
+                      <div class="tag-row"><span class="tag">研究</span><span class="tag">图片</span></div>
+                    </div>
+                    <div class="field"><label class="label">标题</label><input class="input" value="实验数据图" /></div>
+                    <div class="field"><label class="label">标签</label><input class="input" value="研究, 图片" /></div>
+                    <div class="field"><label class="label">注释</label><textarea class="textarea" rows="3">复现实验用的原始数据。</textarea></div>
+                    <div style="display: flex; gap: 8px"><button class="btn btn-primary btn-sm">保存</button><button class="btn btn-ghost btn-sm">重试附件归档</button></div>
+                    <div class="section">
+                      <h3 class="section-title" style="font-size: 15px">附件归档</h3>
+                      <div class="archive-item">
+                        <div><div class="item-title">实验数据.png</div><div class="caption">已归档 · 82 KB</div></div>
+                        <button class="btn btn-secondary btn-sm">打开</button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </main>
+      </div>
+    </section>
+
+    <!-- ================= 15. Automation ================= -->
+    <section class="artboard" id="automation">
+      <div class="app" data-shell="desktop" data-active="automation">
+        <main class="content">
+          <div class="page">
+            <div class="page-inner">
+              <div class="page-head">
+                <div><div class="page-title">自动化</div><p class="page-subtitle">自动回复、消息关注、定时任务和 AI 助手。</p></div>
+              </div>
+              <div class="surface">
+                <div class="empty">
+                  <div class="empty-icon"><svg class="icon" aria-hidden="true"><use href="#i-automation"></use></svg></div>
+                  <div class="empty-title">启用自动化功能</div>
+                  <p class="empty-text">启动 WeChat Agent 后，可以创建自动回复、关键词关注和定时任务。</p>
+                  <button class="btn btn-secondary">查看如何启用</button>
+                </div>
+              </div>
+              <div class="section">
+                <div class="section-head"><div class="section-head-text"><h2 class="section-title">启用后可以做什么</h2></div></div>
+                <div class="surface surface-flush">
+                  <div class="rows">
+                    <div class="row">
+                      <div class="avatar avatar-sm"><svg class="icon icon-sm" aria-hidden="true"><use href="#i-message"></use></svg></div>
+                      <div class="row-body"><div class="row-title"><strong>自动回复</strong></div><div class="row-meta">按关键词或会话自动回复消息。</div></div>
+                    </div>
+                    <div class="row">
+                      <div class="avatar avatar-sm"><svg class="icon icon-sm" aria-hidden="true"><use href="#i-bell"></use></svg></div>
+                      <div class="row-body"><div class="row-title"><strong>消息关注</strong></div><div class="row-meta">关注重要联系人或关键词，出现时提醒。</div></div>
+                    </div>
+                    <div class="row">
+                      <div class="avatar avatar-sm"><svg class="icon icon-sm" aria-hidden="true"><use href="#i-clock"></use></svg></div>
+                      <div class="row-body"><div class="row-title"><strong>定时任务</strong></div><div class="row-meta">按计划发送提醒或整理消息。</div></div>
+                    </div>
+                    <div class="row">
+                      <div class="avatar avatar-sm"><svg class="icon icon-sm" aria-hidden="true"><use href="#i-sparkle"></use></svg></div>
+                      <div class="row-body"><div class="row-title"><strong>AI 总结 / AI 助手</strong></div><div class="row-meta">对长会话做摘要，或让助手协助起草回复。</div></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </main>
+      </div>
+    </section>
+
+    <!-- ================= 16. Settings ================= -->
+    <section class="artboard" id="settings">
+      <div class="app" data-shell="desktop" data-active="settings">
+        <main class="content">
+          <div class="page">
+            <div class="page-inner wide">
+              <div class="page-head"><div><div class="page-title">设置</div></div></div>
+              <div class="settings-layout">
+                <div class="settings-nav">
+                  <button aria-current="true">常规</button>
+                  <button>微信</button>
+                  <button>Telegram 集成</button>
+                  <button>AI 助手</button>
+                  <button>数据与存储</button>
+                  <button>高级与诊断</button>
+                </div>
+                <div class="settings-panels">
+                  <div class="section">
+                    <div class="section-head"><div class="section-head-text"><h2 class="section-title">常规</h2></div></div>
+                    <div class="surface surface-flush">
+                      <div class="settings-group">
+                        <div class="settings-item">
+                          <div class="settings-item-body"><div class="settings-item-title">外观</div><div class="settings-item-text">浅色更适合查看微信登录画面。</div></div>
+                          <select class="select" style="width: 160px"><option>跟随系统</option><option>浅色</option><option>深色</option></select>
+                        </div>
+                        <div class="settings-item">
+                          <div class="settings-item-body"><div class="settings-item-title">自动刷新</div><div class="settings-item-text">页面回到前台时刷新状态。</div></div>
+                          <label class="switch"><input type="checkbox" checked aria-label="自动刷新" /><span class="switch-track"></span></label>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="section">
+                    <div class="section-head"><div class="section-head-text"><h2 class="section-title">Telegram 集成</h2></div></div>
+                    <div class="surface surface-flush">
+                      <div class="settings-group">
+                        <div class="settings-item">
+                          <div class="avatar avatar-sm"><svg class="icon icon-sm" aria-hidden="true"><use href="#i-telegram"></use></svg></div>
+                          <div class="settings-item-body"><div class="settings-item-title">Telegram 集成</div><div class="settings-item-text">未启用。启用后可以在 Telegram 中收发这些微信的消息。</div></div>
+                          <span class="pill">未启用</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </main>
+      </div>
+    </section>
+
+    <!-- ================= 17. Diagnostics ================= -->
+    <section class="artboard" id="diagnostics">
+      <div class="app" data-shell="desktop" data-active="settings">
+        <main class="content">
+          <div class="page">
+            <div class="page-inner wide">
+              <div class="page-head">
+                <div><div class="page-title">高级与诊断</div><p class="page-subtitle">技术信息集中在这一层，不影响主体验。</p></div>
+              </div>
+              <div class="settings-layout">
+                <div class="settings-nav">
+                  <button>常规</button><button>微信</button><button>Telegram 集成</button><button>AI 助手</button><button>数据与存储</button><button aria-current="true">高级与诊断</button>
+                </div>
+                <div class="settings-panels">
+                  <div class="section">
+                    <div class="section-head"><div class="section-head-text"><h2 class="section-title">服务状态</h2></div></div>
+                    <div class="surface surface-flush">
+                      <div class="rows">
+                        <div class="row">
+                          <div class="row-body"><div class="row-title"><strong>wechat-core</strong><span class="pill" data-tone="brand">必需 · 在线</span></div><div class="row-meta mono">http://wechat-core:8080 · contract v1</div></div>
+                        </div>
+                        <div class="row">
+                          <div class="row-body"><div class="row-title"><strong>wechat-agent</strong><span class="pill">可选 · 未配置</span></div><div class="row-meta">未配置属于正常状态。</div></div>
+                        </div>
+                        <div class="row">
+                          <div class="row-body"><div class="row-title"><strong>efb-multi</strong><span class="pill">可选 · 未配置</span></div><div class="row-meta">Telegram 集成未运行。</div></div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="section">
+                    <div class="section-head"><div class="section-head-text"><h2 class="section-title">账号运行详情</h2></div></div>
+                    <div class="surface surface-flush">
+                      <dl class="kv">
+                        <div><dt>account_id</dt><dd>work</dd></div>
+                        <div><dt>runtime_provider</dt><dd>agent_wechat</dd></div>
+                        <div><dt>runtime_health</dt><dd>healthy</dd></div>
+                        <div><dt>agent_server_healthy</dt><dd>true</dd></div>
+                        <div><dt>PID</dt><dd>5012</dd></div>
+                        <div><dt>HOME</dt><dd>/config/agent-wechat/work/home</dd></div>
+                        <div><dt>image</dt><dd>ghcr.io/thisnick/agent-wechat:0.11.15</dd></div>
+                        <div><dt>sender capability</dt><dd>text=true image=true file=true</dd></div>
+                      </dl>
+                    </div>
+                  </div>
+                  <div class="section">
+                    <div class="section-head"><div class="section-head-text"><h2 class="section-title">同步状态与日志</h2></div></div>
+                    <div class="surface surface-flush">
+                      <div class="log-list">
+                        <div class="log-row"><span>2026/9/2 10:39:43</span><span class="log-level">info</span><span>core-sync</span><span class="log-message">Core events synchronized · cursor 3</span></div>
+                        <div class="log-row"><span>2026/9/2 10:38:02</span><span class="log-level" data-tone="warn">warn</span><span>runtime</span><span class="log-message">agent server health probe returned 503</span></div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </main>
+      </div>
+    </section>
+
+    <!-- ================= 18. Core offline ================= -->
+    <section class="artboard" id="core-offline">
+      <div class="app" data-shell="desktop" data-active="home" data-core="offline">
+        <main class="content">
+          <div class="page">
+            <div class="page-inner">
+              <div class="page-head"><div><div class="page-title">首页</div></div></div>
+              <div class="surface">
+                <div class="empty">
+                  <div class="empty-icon"><svg class="icon" aria-hidden="true"><use href="#i-alertCircle"></use></svg></div>
+                  <div class="empty-title">WeChat Hub 暂时无法连接</div>
+                  <p class="empty-text">账号和消息可能暂时无法更新。已经同步过的消息和收藏仍然可以查看。</p>
+                  <button class="btn btn-primary">重新连接</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </main>
+      </div>
+    </section>
+
+    <!-- ================= 19. Mobile home ================= -->
+    <section class="artboard" id="m-home">
+      <div class="phone">
+        <div class="app" data-shell="mobile" data-active="home" data-title="首页">
+          <main class="content">
+            <div class="page">
+              <div class="page-inner">
+                <div class="banner">
+                  <svg class="icon banner-icon" aria-hidden="true"><use href="#i-alertTriangle"></use></svg>
+                  <div class="banner-body">
+                    <div class="banner-title">工作微信需要重新登录</div>
+                    <div class="banner-text">微信已经启动，等待手机扫码。</div>
+                  </div>
+                </div>
+                <div class="section">
+                  <div class="section-head"><div class="section-head-text"><h2 class="section-title">我的微信</h2></div></div>
+                  <div class="surface surface-flush">
+                    <div class="rows">
+                      <div class="row">
+                        <div class="avatar" data-tone="good">个</div>
+                        <div class="row-body"><div class="row-title"><strong>个人微信</strong></div><div class="row-meta"><span class="status" data-tone="good"><span class="status-glyph"></span>已连接</span></div></div>
+                        <div class="row-actions"><button class="btn btn-secondary btn-sm">查看消息</button></div>
+                      </div>
+                      <div class="row">
+                        <div class="avatar" data-tone="warn">工</div>
+                        <div class="row-body"><div class="row-title"><strong>工作微信</strong></div><div class="row-meta"><span class="status" data-tone="warn"><span class="status-glyph"></span>等待登录</span></div></div>
+                        <div class="row-actions"><button class="btn btn-primary btn-sm">扫码登录</button></div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div class="section">
+                  <div class="section-head"><div class="section-head-text"><h2 class="section-title">最近消息</h2></div></div>
+                  <div class="surface surface-flush">
+                    <div class="rows">
+                      <div class="row">
+                        <div class="avatar avatar-sm">A</div>
+                        <div class="row-body"><div class="row-title"><strong>Alice</strong></div><div class="row-meta"><span class="truncate">下午三点的会议还开吗？</span></div></div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </main>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= 20. Mobile accounts ================= -->
+    <section class="artboard" id="m-accounts">
+      <div class="phone">
+        <div class="app" data-shell="mobile" data-active="accounts" data-title="微信">
+          <main class="content">
+            <div class="page">
+              <div class="page-inner">
+                <div class="page-head">
+                  <div><div class="page-title">微信</div><p class="page-subtitle">管理这台 NAS 上的微信账号。</p></div>
+                  <div class="page-head-actions"><button class="btn btn-primary btn-block"><svg class="icon icon-sm" aria-hidden="true"><use href="#i-plus"></use></svg>添加微信</button></div>
+                </div>
+                <div class="surface surface-flush">
+                  <div class="rows">
+                    <div class="row" data-stack="true">
+                      <div class="avatar" data-tone="good">个</div>
+                      <div class="row-body"><div class="row-title"><strong>个人微信</strong><span class="pill" data-tone="brand">推荐模式（Beta）</span></div><div class="row-meta"><span class="status" data-tone="good"><span class="status-glyph"></span>已连接</span></div></div>
+                      <button class="btn btn-icon" aria-label="个人微信的更多操作"><svg class="icon" aria-hidden="true"><use href="#i-more"></use></svg></button>
+                      <div class="row-actions"><button class="btn btn-secondary">打开微信</button></div>
+                    </div>
+                    <div class="row" data-stack="true">
+                      <div class="avatar" data-tone="warn">工</div>
+                      <div class="row-body"><div class="row-title"><strong>工作微信</strong><span class="pill" data-tone="brand">推荐模式（Beta）</span></div><div class="row-meta"><span class="status" data-tone="warn"><span class="status-glyph"></span>等待登录</span></div></div>
+                      <button class="btn btn-icon" aria-label="工作微信的更多操作"><svg class="icon" aria-hidden="true"><use href="#i-more"></use></svg></button>
+                      <div class="row-actions"><button class="btn btn-primary">扫码登录</button></div>
+                    </div>
+                    <div class="row" data-stack="true">
+                      <div class="avatar">备</div>
+                      <div class="row-body"><div class="row-title"><strong>备用微信</strong><span class="pill">兼容模式</span></div><div class="row-meta"><span class="status" data-tone="idle"><span class="status-glyph"></span>已停止</span></div></div>
+                      <button class="btn btn-icon" aria-label="备用微信的更多操作"><svg class="icon" aria-hidden="true"><use href="#i-more"></use></svg></button>
+                      <div class="row-actions"><button class="btn btn-secondary">启动</button></div>
+                    </div>
+                  </div>
+                </div>
+                <p class="caption">手机上 <code>···</code> 打开底部操作面板（Bottom Sheet），触摸目标 ≥ 44px。</p>
+              </div>
+            </div>
+          </main>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= 21. Mobile login ================= -->
+    <section class="artboard" id="m-login">
+      <div class="phone phone-modal">
+        <div class="phone-dialog login-dialog">
+          <div class="modal-shell">
+            <div class="modal-head">
+              <div class="modal-head-text"><div class="modal-title">登录工作微信</div></div>
+              <button class="btn btn-icon" aria-label="关闭登录窗口"><svg class="icon" aria-hidden="true"><use href="#i-close"></use></svg></button>
+            </div>
+            <div class="modal-body">
+              <div class="login-stage">
+                <div class="banner" data-tone="info" style="text-align: left">
+                  <svg class="icon banner-icon" aria-hidden="true"><use href="#i-info"></use></svg>
+                  <div class="banner-body">
+                    <div class="banner-title">建议在电脑或平板上打开此页面</div>
+                    <div class="banner-text">再使用手机微信扫码会更方便。</div>
+                  </div>
+                </div>
+                <div class="login-frame" style="max-width: 100%">
+                  <img src="./wechat-login-window.svg" alt="微信登录窗口，使用手机微信扫描其中的二维码" />
+                </div>
+                <p class="login-note">登录画面只在当前会话中临时显示，不会保存。</p>
+              </div>
+            </div>
+            <div class="modal-foot">
+              <button class="btn btn-ghost btn-sm">刷新画面</button>
+              <div class="spacer"></div>
+              <button class="btn btn-secondary btn-sm">打开完整微信</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= 22. Dark — accounts ================= -->
+    <section class="artboard" id="dark-accounts">
+      <div class="app" data-shell="desktop" data-active="accounts">
+        <main class="content">
+          <div class="page">
+            <div class="page-inner">
+              <div class="page-head">
+                <div>
+                  <div class="page-title">微信</div>
+                  <p class="page-subtitle">管理运行在这台 NAS 上的微信账号。</p>
+                </div>
+                <div class="page-head-actions">
+                  <button class="btn btn-ghost btn-sm" aria-label="刷新状态"><svg class="icon icon-sm" aria-hidden="true"><use href="#i-refresh"></use></svg>刷新</button>
+                  <button class="btn btn-primary"><svg class="icon icon-sm" aria-hidden="true"><use href="#i-plus"></use></svg>添加微信</button>
+                </div>
+              </div>
+
+              <div class="surface surface-flush">
+                <div class="rows">
+                  <div class="row">
+                    <div class="avatar" data-tone="good">个</div>
+                    <div class="row-body">
+                      <div class="row-title"><strong>个人微信</strong><span class="pill" data-tone="brand">推荐模式（Beta）</span></div>
+                      <div class="row-meta"><span class="status" data-tone="good"><span class="status-glyph"></span>已连接</span><span>今天 09:21 登录</span></div>
+                    </div>
+                    <div class="row-actions">
+                      <button class="btn btn-secondary">打开微信</button>
+                      <button class="btn btn-icon" aria-label="个人微信的更多操作"><svg class="icon" aria-hidden="true"><use href="#i-more"></use></svg></button>
+                    </div>
+                  </div>
+                  <div class="row">
+                    <div class="avatar" data-tone="warn">工</div>
+                    <div class="row-body">
+                      <div class="row-title"><strong>工作微信</strong><span class="pill" data-tone="brand">推荐模式（Beta）</span></div>
+                      <div class="row-meta"><span class="status" data-tone="warn"><span class="status-glyph"></span>等待登录</span><span>微信已启动，等待扫码</span></div>
+                    </div>
+                    <div class="row-actions">
+                      <button class="btn btn-primary">扫码登录</button>
+                      <button class="btn btn-icon" aria-label="工作微信的更多操作"><svg class="icon" aria-hidden="true"><use href="#i-more"></use></svg></button>
+                    </div>
+                  </div>
+                  <div class="row">
+                    <div class="avatar">备</div>
+                    <div class="row-body">
+                      <div class="row-title"><strong>备用微信</strong><span class="pill">兼容模式</span></div>
+                      <div class="row-meta"><span class="status" data-tone="idle"><span class="status-glyph"></span>已停止</span><span>自动启动已关闭</span></div>
+                    </div>
+                    <div class="row-actions">
+                      <button class="btn btn-secondary">启动</button>
+                      <button class="btn btn-icon" aria-label="备用微信的更多操作"><svg class="icon" aria-hidden="true"><use href="#i-more"></use></svg></button>
+                    </div>
+                  </div>
+                  <div class="row">
+                    <div class="avatar" data-tone="bad">家</div>
+                    <div class="row-body">
+                      <div class="row-title"><strong>家人共享微信（长名称测试账号）</strong><span class="pill" data-tone="brand">推荐模式（Beta）</span></div>
+                      <div class="row-meta"><span class="status" data-tone="bad"><span class="status-glyph"></span>微信服务异常</span><span>微信进程仍在运行，控制服务暂时不可用</span></div>
+                    </div>
+                    <div class="row-actions">
+                      <button class="btn btn-secondary">重新启动</button>
+                      <button class="btn btn-icon" aria-label="更多操作"><svg class="icon" aria-hidden="true"><use href="#i-more"></use></svg></button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="banner">
+                <svg class="icon banner-icon" aria-hidden="true"><use href="#i-alertTriangle"></use></svg>
+                <div class="banner-body">
+                  <div class="banner-title">深色下语义色改用提亮变体</div>
+                  <div class="banner-text">
+                    绿色文字用 <code>--brand-text</code>（深色下提亮为 #4FD894），填充按钮仍用 <code>--brand</code>；
+                    警告、危险、进行中同理。深色不是把浅色调暗，而是各自独立取值。
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </main>
+      </div>
+    </section>
+
+    <!-- ================= 23. Dark — login ================= -->
+    <section class="artboard" id="dark-login">
+      <div class="app" data-shell="desktop" data-active="accounts" data-dim="1"></div>
+      <div class="concept-modal login-dialog">
+        <div class="modal-shell">
+          <div class="modal-head">
+            <div class="modal-head-text"><div class="modal-title">登录工作微信</div></div>
+            <button class="btn btn-icon" aria-label="关闭登录窗口"><svg class="icon" aria-hidden="true"><use href="#i-close"></use></svg></button>
+          </div>
+          <div class="modal-body">
+            <div class="login-stage">
+              <p class="login-instruction">请使用手机微信扫描窗口中的二维码。</p>
+              <div class="login-frame">
+                <img src="./wechat-login-window.svg" alt="微信登录窗口，使用手机微信扫描其中的二维码" />
+              </div>
+              <p class="login-note">登录画面只在当前会话中临时显示，不会保存。</p>
+            </div>
+          </div>
+          <div class="modal-foot">
+            <button class="btn btn-ghost btn-sm">刷新画面</button>
+            <div class="spacer"></div>
+            <button class="btn btn-secondary">打开完整微信</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= 24. Dark — system ================= -->
+    <section class="artboard" id="dark-system">
+      <div class="board">
+        <div>
+          <div class="page-title">深色主题对照</div>
+          <p class="page-subtitle">
+            深色只覆盖 token 值，组件样式不分叉。登录画面所在的白色底板在两种主题下都保持白色。
+          </p>
+        </div>
+
+        <div class="section">
+          <div class="section-head"><div class="section-head-text"><h2 class="section-title">按钮与状态</h2></div></div>
+          <div class="surface specimen">
+            <div class="specimen-row" style="gap: 12px; flex-wrap: wrap">
+              <button class="btn btn-primary">扫码登录</button>
+              <button class="btn btn-secondary">打开微信</button>
+              <button class="btn btn-ghost">刷新</button>
+              <button class="btn btn-danger">移除微信</button>
+              <button class="btn btn-primary" disabled>正在启动</button>
+            </div>
+            <div class="specimen-row" style="gap: 20px; flex-wrap: wrap">
+              <span class="status" data-tone="good"><span class="status-glyph"></span>已连接</span>
+              <span class="status" data-tone="warn"><span class="status-glyph"></span>等待登录</span>
+              <span class="status" data-tone="busy"><span class="status-glyph"></span>正在启动</span>
+              <span class="status" data-tone="idle"><span class="status-glyph"></span>已停止</span>
+              <span class="status" data-tone="bad"><span class="status-glyph"></span>微信服务异常</span>
+            </div>
+            <div class="specimen-row" style="gap: 12px; flex-wrap: wrap">
+              <span class="pill" data-tone="brand">推荐模式（Beta）</span>
+              <span class="pill">兼容模式</span>
+              <span class="pill" data-tone="info">自动启动</span>
+              <span class="pill" data-tone="warn">需要处理</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="section">
+          <div class="section-head"><div class="section-head-text"><h2 class="section-title">发送结果</h2></div></div>
+          <div class="surface" style="padding: 20px; display: flex; flex-direction: column; gap: 12px">
+            <div class="send-result" data-state="sent">
+              <svg class="icon" aria-hidden="true" style="color: var(--brand-text)"><use href="#i-check"></use></svg>
+              <div class="send-result-body"><div class="send-result-title">已确认发送</div></div>
+            </div>
+            <div class="send-result" data-state="uncertain">
+              <svg class="icon" aria-hidden="true" style="color: var(--warning-text)"><use href="#i-alertTriangle"></use></svg>
+              <div class="send-result-body">
+                <div class="send-result-title">发送结果未知</div>
+                <div class="send-result-text">微信可能已经收到这条消息。为避免重复发送，系统没有自动重试。</div>
+                <div class="send-result-actions">
+                  <button class="btn btn-secondary btn-sm">查看消息</button>
+                  <button class="btn btn-ghost btn-sm">仍然重新发送</button>
+                </div>
+              </div>
+            </div>
+            <div class="send-result" data-state="failed">
+              <svg class="icon" aria-hidden="true" style="color: var(--danger-text)"><use href="#i-alertCircle"></use></svg>
+              <div class="send-result-body">
+                <div class="send-result-title">发送失败</div>
+                <div class="send-result-text">微信没有接收这条消息，可以重新发送。</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="section">
+          <div class="section-head"><div class="section-head-text"><h2 class="section-title">登录画面底板</h2></div></div>
+          <div class="surface" style="padding: 24px; display: grid; place-items: center">
+            <div class="login-frame">
+              <img src="./wechat-login-window.svg" alt="微信登录窗口示意" />
+            </div>
+          </div>
+          <p class="caption">
+            微信登录窗口截图本身永远是浅色。底板 <code>--login-plate</code> 固定白色，
+            外圈 <code>--login-mat</code> 在深色下压暗，避免大块白色在深色弹窗里发光；
+            不使用任何 filter / blend，避免改变二维码或遮挡确认按钮。
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <script type="module">
+      import { mountIconSprite, icon } from "../../wechat_console/static/js/icons.js";
+      mountIconSprite();
+
+      const NAV = [
+        ["home", "首页", "home"],
+        ["accounts", "微信", "wechat"],
+        ["messages", "消息", "message"],
+        ["saved", "收藏", "star"],
+        ["automation", "自动化", "automation"],
+        ["settings", "设置", "settings"],
+      ];
+      const TABS = [
+        ["home", "首页", "home"],
+        ["accounts", "微信", "wechat"],
+        ["messages", "消息", "message"],
+        ["saved", "收藏", "star"],
+        ["settings", "更多", "settings"],
+      ];
+
+      for (const shell of document.querySelectorAll('[data-shell="desktop"]')) {
+        const active = shell.dataset.active;
+        const offline = shell.dataset.core === "offline";
+        const nav = document.createElement("nav");
+        nav.className = "nav";
+        nav.setAttribute("aria-label", "主导航");
+        nav.innerHTML = `
+          <div class="nav-brand">
+            <div class="nav-mark">微</div>
+            <div class="nav-brand-text">
+              <div class="nav-brand-name">WeChat Hub</div>
+              <div class="nav-brand-sub">多微信管理</div>
+            </div>
+          </div>
+          <div class="nav-list">
+            ${NAV.map(
+              ([id, label, ic]) => `
+              <button class="nav-item" ${id === active ? 'aria-current="page"' : ""}>
+                ${icon(ic)}<span class="nav-item-label">${label}</span>
+                ${id === "accounts" ? '<span class="nav-badge">1</span>' : ""}
+              </button>`,
+            ).join("")}
+          </div>
+          <div class="nav-foot">
+            <div class="nav-core-state" ${offline ? 'data-tone="bad"' : ""}>
+              ${icon(offline ? "alertCircle" : "check", { size: "sm" })}
+              <span>${offline ? "无法连接 WeChat Hub" : "运行正常"}</span>
+            </div>
+          </div>`;
+        shell.prepend(nav);
+      }
+
+      for (const shell of document.querySelectorAll('[data-shell="mobile"]')) {
+        const active = shell.dataset.active;
+        const bar = document.createElement("div");
+        bar.className = "topbar";
+        bar.style.display = "flex";
+        bar.innerHTML = `
+          <button class="btn btn-icon" aria-label="打开导航">${icon("menu")}</button>
+          <div class="topbar-title">${shell.dataset.title || ""}</div>`;
+        shell.querySelector(".content").prepend(bar);
+
+        const tabbar = document.createElement("nav");
+        tabbar.className = "tabbar";
+        tabbar.style.display = "block";
+        tabbar.style.position = "absolute";
+        tabbar.innerHTML = `<div class="tabbar-list">${TABS.map(
+          ([id, label, ic]) => `
+          <button class="tabbar-item" ${id === active ? 'aria-current="page"' : ""}>
+            ${icon(ic)}<span>${label}</span>
+            ${id === "accounts" ? '<span class="tab-dot"></span>' : ""}
+          </button>`,
+        ).join("")}</div>`;
+        shell.append(tabbar);
+        shell.style.paddingBottom = "58px";
+      }
+
+      /* Login / wizard artboards reuse the accounts page as their backdrop so the
+       * dialog is judged in its real context rather than against blank canvas. */
+      const BACKDROP = `
+        <main class="content">
+          <div class="page">
+            <div class="page-inner">
+              <div class="page-head">
+                <div>
+                  <div class="page-title">微信</div>
+                  <p class="page-subtitle">管理运行在这台 NAS 上的微信账号。</p>
+                </div>
+                <div class="page-head-actions">
+                  <button class="btn btn-primary">${icon("plus", { size: "sm" })}添加微信</button>
+                </div>
+              </div>
+              <div class="surface surface-flush">
+                <div class="rows">
+                  <div class="row">
+                    <div class="avatar" data-tone="good">个</div>
+                    <div class="row-body">
+                      <div class="row-title"><strong>个人微信</strong><span class="pill" data-tone="brand">推荐模式（Beta）</span></div>
+                      <div class="row-meta"><span class="status" data-tone="good"><span class="status-glyph"></span>已连接</span><span>今天 09:21 登录</span></div>
+                    </div>
+                    <div class="row-actions"><button class="btn btn-secondary">打开微信</button></div>
+                  </div>
+                  <div class="row">
+                    <div class="avatar" data-tone="warn">工</div>
+                    <div class="row-body">
+                      <div class="row-title"><strong>工作微信</strong><span class="pill" data-tone="brand">推荐模式（Beta）</span></div>
+                      <div class="row-meta"><span class="status" data-tone="warn"><span class="status-glyph"></span>等待登录</span></div>
+                    </div>
+                    <div class="row-actions"><button class="btn btn-primary">扫码登录</button></div>
+                  </div>
+                  <div class="row">
+                    <div class="avatar">备</div>
+                    <div class="row-body">
+                      <div class="row-title"><strong>备用微信</strong><span class="pill">兼容模式</span></div>
+                      <div class="row-meta"><span class="status" data-tone="idle"><span class="status-glyph"></span>已停止</span></div>
+                    </div>
+                    <div class="row-actions"><button class="btn btn-secondary">启动</button></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </main>`;
+
+      for (const shell of document.querySelectorAll('.app[data-dim="1"]')) {
+        if (!shell.querySelector(".content")) shell.insertAdjacentHTML("beforeend", BACKDROP);
+      }
+
+      /* Concept-only modal presentation: real app uses <dialog>. */
+      for (const modal of document.querySelectorAll(".concept-modal")) {
+        const scrim = document.createElement("div");
+        scrim.className = "concept-scrim";
+        modal.parentNode.insertBefore(scrim, modal);
+      }
+    </script>
+    <style>
+      .artboard:has(.concept-modal) {
+        position: relative;
+        min-height: 100vh;
+      }
+      .artboard [data-dim="1"] {
+        filter: saturate(0.6);
+      }
+      .concept-scrim {
+        position: absolute;
+        inset: 0;
+        z-index: 8;
+        background: var(--bg-overlay);
+      }
+      .concept-modal {
+        position: fixed;
+        z-index: 10;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        width: min(560px, calc(100vw - 32px));
+        background: var(--bg-surface);
+        border-radius: var(--r-lg);
+        box-shadow: var(--shadow-3);
+        overflow: hidden;
+      }
+    </style>
+  </body>
+</html>

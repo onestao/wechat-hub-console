@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>WeChat Hub</title>
+    <!-- Synchronous classic script: sets data-theme before first paint to prevent flash -->
+    <script src="/js/theme-boot.js"></script>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="app" id="appRoot">
+      <!-- Primary Desktop / Tablet Navigation -->
+      <nav class="nav" id="mainNav" aria-label="全局主导航">
+        <div class="nav-brand">
+          <div class="nav-mark">微</div>
+          <div class="nav-brand-text">
+            <div class="nav-brand-name">WeChat Hub</div>
+            <div class="nav-brand-sub">Console</div>
+          </div>
+        </div>
+
+        <div class="nav-list">
+          <a class="nav-item" href="#/home" data-nav="home">
+            <svg class="icon" aria-hidden="true"><use href="#i-home"></use></svg>
+            <span class="nav-item-label">首页</span>
+          </a>
+          <a class="nav-item" href="#/accounts" data-nav="accounts">
+            <svg class="icon" aria-hidden="true"><use href="#i-wechat"></use></svg>
+            <span class="nav-item-label">微信</span>
+            <span class="nav-badge" id="navAccountBadge" style="display: none;">0</span>
+          </a>
+          <a class="nav-item" href="#/messages" data-nav="messages">
+            <svg class="icon" aria-hidden="true"><use href="#i-message"></use></svg>
+            <span class="nav-item-label">消息</span>
+          </a>
+          <a class="nav-item" href="#/saved" data-nav="saved">
+            <svg class="icon" aria-hidden="true"><use href="#i-star"></use></svg>
+            <span class="nav-item-label">收藏</span>
+          </a>
+          <a class="nav-item" href="#/automation" data-nav="automation">
+            <svg class="icon" aria-hidden="true"><use href="#i-automation"></use></svg>
+            <span class="nav-item-label">自动化</span>
+          </a>
+          <a class="nav-item" href="#/settings" data-nav="settings">
+            <svg class="icon" aria-hidden="true"><use href="#i-settings"></use></svg>
+            <span class="nav-item-label">设置</span>
+          </a>
+        </div>
+
+        <div class="nav-foot">
+          <div class="nav-core-state" id="navCoreState" data-tone="">
+            <svg class="icon icon-sm" aria-hidden="true"><use href="#i-shield"></use></svg>
+            <span id="navCoreStateText">运行正常</span>
+          </div>
+        </div>
+      </nav>
+
+      <!-- Tablet / Mobile Topbar -->
+      <header class="topbar">
+        <button class="btn btn-icon" id="topbarHamburgerBtn" aria-label="打开导航菜单">
+          <svg class="icon" aria-hidden="true"><use href="#i-menu"></use></svg>
+        </button>
+        <div class="topbar-title" id="topbarTitle">WeChat Hub</div>
+      </header>
+
+      <!-- Main Content Column -->
+      <main class="content">
+        <section class="page" id="page-home" data-route="home" hidden></section>
+        <section class="page" id="page-accounts" data-route="accounts" hidden></section>
+        <section class="page" id="page-messages" data-route="messages" hidden></section>
+        <section class="page" id="page-saved" data-route="saved" hidden></section>
+        <section class="page" id="page-automation" data-route="automation" hidden></section>
+        <section class="page" id="page-settings" data-route="settings" hidden></section>
+      </main>
+
+      <!-- Mobile Tab Bar (<=767px) -->
+      <nav class="tabbar" aria-label="移动端底部导航">
+        <div class="tabbar-list">
+          <a class="tabbar-item" href="#/home" data-tab="home">
+            <svg class="icon" aria-hidden="true"><use href="#i-home"></use></svg>
+            <span>首页</span>
+          </a>
+          <a class="tabbar-item" href="#/accounts" data-tab="accounts">
+            <svg class="icon" aria-hidden="true"><use href="#i-wechat"></use></svg>
+            <span>微信</span>
+            <span class="tab-dot" id="tabbarAccountDot" style="display: none;"></span>
+          </a>
+          <a class="tabbar-item" href="#/messages" data-tab="messages">
+            <svg class="icon" aria-hidden="true"><use href="#i-message"></use></svg>
+            <span>消息</span>
+          </a>
+          <a class="tabbar-item" href="#/saved" data-tab="saved">
+            <svg class="icon" aria-hidden="true"><use href="#i-star"></use></svg>
+            <span>收藏</span>
+          </a>
+          <a class="tabbar-item" href="#/settings" data-tab="settings">
+            <svg class="icon" aria-hidden="true"><use href="#i-settings"></use></svg>
+            <span>更多</span>
+          </a>
+        </div>
+      </nav>
+
+      <!-- Tablet Navigation Scrim -->
+      <div class="nav-scrim" id="navScrim"></div>
+
+      <!-- Toast Stack -->
+      <div class="toast-stack" role="status" aria-live="polite"></div>
+
+      <!-- Dialogs -->
+      <dialog class="modal login-dialog" id="loginDialog"></dialog>
+      <dialog class="modal" id="addAccountDialog"></dialog>
+      <dialog class="modal" id="confirmDialog"></dialog>
+      <dialog class="modal" id="saveMessageModal"></dialog>
+      <dialog class="drawer" id="accountDetailDrawer"></dialog>
+      <dialog class="sheet" id="actionSheetDialog"></dialog>
+    </div>
+
+    <!-- Main Module Application Entrypoint -->
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
