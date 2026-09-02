@@ -5,6 +5,7 @@
  */
 
 import { api } from "../api.js";
+import { state } from "../state.js";
 import { escapeHtml, escapeAttr } from "../format.js";
 import { icon } from "../icons.js";
 import { openDialog, closeDialog } from "./dialog.js";
@@ -23,7 +24,14 @@ function ensureLoginDialog() {
     el = document.createElement("dialog");
     el.id = "loginDialog";
     el.className = "modal login-dialog";
+    el.addEventListener("close", () => {
+      stopPolling();
+    });
     document.body.appendChild(el);
+  } else {
+    el.addEventListener("close", () => {
+      stopPolling();
+    });
   }
   loginDialogEl = el;
   return el;
@@ -68,9 +76,16 @@ export async function startLogin(accountId, accountName = "", callbacks = {}) {
     console.warn("startLogin API returned error or was already starting:", err);
   }
 
-  // Poll immediately and then every 3 seconds
-  await pollStatus();
-  pollTimer = setInterval(pollStatus, 3000);
+  // Poll immediately and start timer only if dialog remains open in an active waiting phase
+  const phase = await pollStatus();
+  if (
+    dialog.open &&
+    phase !== "online" &&
+    phase !== "error" &&
+    phase !== "stopped"
+  ) {
+    pollTimer = setInterval(pollStatus, 3000);
+  }
 }
 
 export function stopPolling() {
@@ -83,30 +98,36 @@ export function stopPolling() {
 async function pollStatus() {
   if (!currentAccountId || !loginDialogEl || !loginDialogEl.open) {
     stopPolling();
-    return;
+    return "stopped";
   }
 
   try {
     const status = await api.loginStatus(currentAccountId);
     if (!loginDialogEl.open) {
       stopPolling();
-      return;
+      return "stopped";
     }
+    const phase = resolveLoginPhase(status);
     renderStage(loginDialogEl, status);
 
-    if (status.state === "online") {
+    if (phase === "online" || phase === "error" || phase === "stopped") {
       stopPolling();
+    }
+    if (phase === "online") {
       if (typeof currentCallbacks.onSuccess === "function") {
         currentCallbacks.onSuccess();
       }
     }
+    return phase;
   } catch (err) {
-    if (!loginDialogEl.open) return;
+    stopPolling();
+    if (!loginDialogEl.open) return "error";
     renderStage(loginDialogEl, {
       state: "error",
       login_flow_state: "error",
       login_flow_error: err.message || "无法读取登录状态",
     });
+    return "error";
   }
 }
 
@@ -421,24 +442,43 @@ export function renderStage(dialog, payload) {
  */
 export async function openDesktopEntry(accountId) {
   try {
-    const info = await api.desktop(accountId);
-    if (info && info.port && info.path) {
-      const port = Number(info.port);
-      const path = String(info.path);
-      if (port >= 1 && port <= 65535 && path.startsWith("/")) {
-        if (info.desktop_provider === "novnc" && info.fallback_reason) {
-          toast({
-            title: "当前使用备用桌面",
-            text: "增强中文输入、剪贴板、文件传输和缩放将在 Selkies 桌面可用后自动恢复。",
-            tone: "warn",
-          });
+    let url = "";
+    try {
+      const info = await api.desktop(accountId);
+      const isAgentWechat = info?.runtime_provider === "agent_wechat";
+      if (info && info.port && info.path) {
+        const port = Number(info.port);
+        const path = String(info.path);
+        if (port >= 1 && port <= 65535 && path.startsWith("/")) {
+          if (info.desktop_provider === "novnc" && info.fallback_reason) {
+            toast({
+              title: "当前使用备用桌面",
+              text: "增强中文输入、剪贴板、文件传输和缩放将在 Selkies 桌面可用后自动恢复。",
+              tone: "warn",
+            });
+          }
+          const scheme = info.scheme || window.location.protocol.replace(":", "");
+          const host = info.host || window.location.hostname;
+          url = `${scheme}://${host}:${port}${path}`;
         }
-        const scheme = info.scheme || window.location.protocol.replace(":", "");
-        const host = info.host || window.location.hostname;
-        const url = `${scheme}://${host}:${port}${path}`;
-        window.open(url, "_blank", "noopener,noreferrer");
-        return;
       }
+      if (!url && !isAgentWechat && state.status?.desktop_url) {
+        url = state.status.desktop_url;
+      }
+    } catch (apiErr) {
+      const account = (state.runtimeAccounts || []).find((a) => a.account_id === accountId) ||
+                      (state.accounts || []).find((a) => a.account_id === accountId);
+      const provider = account?.runtime_provider || account?.runtime?.runtime_provider || "legacy";
+      if (provider !== "agent_wechat" && state.status?.desktop_url) {
+        url = state.status.desktop_url;
+      } else {
+        throw apiErr;
+      }
+    }
+
+    if (url) {
+      window.open(url, "_blank", "noopener,noreferrer");
+      return;
     }
     toast({ title: "微信桌面入口尚未就绪，请稍后重试。", tone: "warn" });
   } catch (err) {

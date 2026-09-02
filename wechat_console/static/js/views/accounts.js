@@ -234,19 +234,32 @@ async function handleAccountAction(action, vm, rowEl, reloadData) {
 }
 
 function generateSlug(name, existingIds = []) {
-  const raw = String(name || "")
+  const sanitized = String(name || "")
     .trim()
     .toLowerCase()
-    .replace(/[^a-z0-9_.-]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-  let base = raw || "wechat";
-  if (!/^[a-z0-9]/i.test(base)) base = `wechat-${base}`;
-  let candidate = base.slice(0, 60);
+    .replace(/[^a-z0-9_.-]+/g, "")
+    .replace(/^[^a-z0-9]+/g, "");
+
+  let base = sanitized;
+  if (!base) {
+    let n = 1;
+    while (existingIds.includes(`wechat-${n}`)) {
+      n++;
+    }
+    return `wechat-${n}`;
+  }
+
+  base = base.slice(0, 64);
+  let candidate = base;
   let counter = 1;
+
   while (existingIds.includes(candidate)) {
     counter++;
-    candidate = `${base}-${counter}`;
+    const suffix = `-${counter}`;
+    const maxBaseLen = 64 - suffix.length;
+    candidate = `${base.slice(0, maxBaseLen)}${suffix}`;
   }
+
   return candidate;
 }
 
@@ -268,6 +281,7 @@ export function openAddWizard(existingVms = [], reloadData) {
     const nameVal = formData.displayName ?? "";
     const idVal = formData.accountId ?? "";
     const providerVal = formData.runtimeProvider ?? "agent_wechat";
+    const displayVal = formData.display ?? "";
     const autostartVal = formData.autostart ?? true;
     const startVal = formData.start ?? true;
 
@@ -341,6 +355,14 @@ export function openAddWizard(existingVms = [], reloadData) {
                 <p class="field-hint">推荐模式每个微信独立运行；兼容模式用于继续使用已有旧版微信数据。</p>
               </div>
 
+              <div class="field" id="addAccDisplayField" style="${providerVal === "legacy" ? "" : "display: none;"}">
+                <label class="label" for="addAccDisplay">Legacy Display</label>
+                <input class="input mono" id="addAccDisplay" name="display" value="${escapeAttr(
+                  displayVal
+                )}" placeholder="例如：:1；留空则使用 Runtime 默认 Display。" />
+                <p class="field-hint">例如：:1；留空则使用 Runtime 默认 Display。</p>
+              </div>
+
               <label class="check">
                 <input type="checkbox" id="addAccAutostart" name="autostart" ${
                   autostartVal ? "checked" : ""
@@ -386,6 +408,14 @@ export function openAddWizard(existingVms = [], reloadData) {
     const form = wizard.querySelector("#addAccountForm");
     const submitBtn = wizard.querySelector("#addWizardSubmitBtn");
     const startCheck = wizard.querySelector("#addAccStart");
+    const providerSelect = wizard.querySelector("#addAccProvider");
+    const displayField = wizard.querySelector("#addAccDisplayField");
+
+    if (providerSelect && displayField) {
+      providerSelect.onchange = () => {
+        displayField.style.display = providerSelect.value === "legacy" ? "" : "none";
+      };
+    }
 
     if (startCheck && submitBtn) {
       startCheck.onchange = () => {
@@ -397,6 +427,7 @@ export function openAddWizard(existingVms = [], reloadData) {
       const name = (form.querySelector("#addAccName").value || "").trim();
       let customId = (form.querySelector("#addAccId").value || "").trim();
       const provider = form.querySelector("#addAccProvider").value;
+      const display = (form.querySelector("#addAccDisplay")?.value || "").trim();
       const autostart = form.querySelector("#addAccAutostart").checked;
       const start = form.querySelector("#addAccStart").checked;
 
@@ -406,7 +437,7 @@ export function openAddWizard(existingVms = [], reloadData) {
       }
 
       if (!customId) {
-        customId = generateSlug(name || "wechat", existingIds);
+        customId = generateSlug(name, existingIds);
       }
 
       if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/.test(customId)) {
@@ -422,6 +453,7 @@ export function openAddWizard(existingVms = [], reloadData) {
             displayName: name,
             accountId: customId,
             runtimeProvider: provider,
+            display,
             autostart,
             start,
           },
@@ -442,6 +474,9 @@ export function openAddWizard(existingVms = [], reloadData) {
           autostart,
           start,
         };
+        if (provider === "legacy" && display) {
+          payload.display = display;
+        }
         await api.createAccount(payload);
         toast({ title: `已成功创建微信「${name}」`, tone: "good" });
         closeDialog(wizard);
@@ -456,6 +491,7 @@ export function openAddWizard(existingVms = [], reloadData) {
             displayName: name,
             accountId: customId,
             runtimeProvider: provider,
+            display,
             autostart,
             start,
           },

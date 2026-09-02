@@ -484,6 +484,108 @@ export function renderMessagesView(container, reloadData) {
     };
   }
 
+  // Wire Image Send
+  const imageBtn = container.querySelector("#composerImageBtn");
+  const imageInput = container.querySelector("#composerImageInput");
+  if (imageBtn && imageInput) {
+    imageBtn.onclick = () => {
+      if (sendDisabled || !selectedChat) return;
+      imageInput.click();
+    };
+    imageInput.onchange = async () => {
+      const file = imageInput.files?.[0];
+      if (!file || !selectedChat) return;
+
+      const clientRequestId = `console-img-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      setState({
+        sendResult: {
+          status: "sending",
+          client_request_id: clientRequestId,
+          text: `[图片: ${file.name}]`,
+        },
+      });
+      renderMessagesView(container, reloadData);
+
+      try {
+        const base64 = await readFileAsBase64(file, { imageOnly: true });
+        const payload = {
+          account_id: state.activeAccountId,
+          chat_id: selectedChat.chat_id,
+          content_base64: base64,
+          filename: file.name,
+          mime_type: file.type || "image/jpeg",
+          client_request_id: clientRequestId,
+        };
+        const receipt = await api.sendImage(payload, clientRequestId);
+        const sendId = receipt.send_id || clientRequestId;
+        watchSendStatus(sendId, `[图片: ${file.name}]`, container, reloadData);
+      } catch (err) {
+        toast(err.message, "bad");
+        setState({
+          sendResult: {
+            status: "failed",
+            error: err.message,
+            text: `[图片: ${file.name}]`,
+          },
+        });
+        renderMessagesView(container, reloadData);
+      } finally {
+        imageInput.value = "";
+      }
+    };
+  }
+
+  // Wire File Send
+  const fileBtn = container.querySelector("#composerFileBtn");
+  const fileInput = container.querySelector("#composerFileInput");
+  if (fileBtn && fileInput) {
+    fileBtn.onclick = () => {
+      if (sendDisabled || !selectedChat) return;
+      fileInput.click();
+    };
+    fileInput.onchange = async () => {
+      const file = fileInput.files?.[0];
+      if (!file || !selectedChat) return;
+
+      const clientRequestId = `console-file-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      setState({
+        sendResult: {
+          status: "sending",
+          client_request_id: clientRequestId,
+          text: `[文件: ${file.name}]`,
+        },
+      });
+      renderMessagesView(container, reloadData);
+
+      try {
+        const base64 = await readFileAsBase64(file, { imageOnly: false });
+        const payload = {
+          account_id: state.activeAccountId,
+          chat_id: selectedChat.chat_id,
+          content_base64: base64,
+          filename: file.name,
+          mime_type: file.type || "application/octet-stream",
+          client_request_id: clientRequestId,
+        };
+        const receipt = await api.sendFile(payload, clientRequestId);
+        const sendId = receipt.send_id || clientRequestId;
+        watchSendStatus(sendId, `[文件: ${file.name}]`, container, reloadData);
+      } catch (err) {
+        toast(err.message, "bad");
+        setState({
+          sendResult: {
+            status: "failed",
+            error: err.message,
+            text: `[文件: ${file.name}]`,
+          },
+        });
+        renderMessagesView(container, reloadData);
+      } finally {
+        fileInput.value = "";
+      }
+    };
+  }
+
   // Wire send result actions
   const retrySendBtn = container.querySelector("#msgRetrySendBtn");
   if (retrySendBtn && state.sendResult?.text) {

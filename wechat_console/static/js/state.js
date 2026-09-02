@@ -8,6 +8,7 @@ export const state = {
   status: null,
   coreOk: true,
   runtimeManagement: null,
+  autoRefresh: true,
 
   // Accounts
   accounts: [],

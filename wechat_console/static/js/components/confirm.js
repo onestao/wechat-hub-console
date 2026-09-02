@@ -92,6 +92,7 @@ export function confirmAction({
     dialog.querySelector("#confirmCloseBtn").onclick = () => cleanup(false);
 
     openDialog(dialog, {
+      preventCancel: tone === "danger",
       onClose: () => {
         if (currentResolver) {
           currentResolver(false);

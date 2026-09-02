@@ -371,8 +371,42 @@ class ConsoleIntegrationTest(unittest.TestCase):
             self.assertEqual(send_status["send_id"], send_id)
             self.assertIn(send_status["status"], {"accepted", "queued", "sending", "submitted", "sent", "failed", "uncertain"})
 
+            status, img_send = self.request(
+                base + "/api/send/image",
+                method="POST",
+                payload={
+                    "account_id": "account-alpha",
+                    "chat_id": "alpha-private-1",
+                    "content_base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+                    "filename": "pixel.png",
+                    "mime_type": "image/png",
+                    "client_request_id": "http-test-img-1",
+                },
+            )
+            self.assertEqual(status, 202)
+            self.assertIn("send_id", img_send)
+            self.assertEqual(img_send.get("kind"), "image")
+
+            status, file_send = self.request(
+                base + "/api/send/file",
+                method="POST",
+                payload={
+                    "account_id": "account-alpha",
+                    "chat_id": "alpha-private-1",
+                    "content_base64": "aGVsbG8gd29ybGQ=",
+                    "filename": "hello.txt",
+                    "mime_type": "text/plain",
+                    "client_request_id": "http-test-file-1",
+                },
+            )
+            self.assertEqual(status, 202)
+            self.assertIn("send_id", file_send)
+            self.assertEqual(file_send.get("kind"), "file")
+
             api_js = (Path(__file__).resolve().parents[1] / "static" / "js" / "api.js").read_text(encoding="utf-8")
             self.assertIn("sendStatus:", api_js)
+            self.assertIn("sendImage:", api_js)
+            self.assertIn("sendFile:", api_js)
 
             status, saved = self.request(
                 base + "/api/saved",

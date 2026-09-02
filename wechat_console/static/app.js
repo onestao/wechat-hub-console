@@ -215,11 +215,15 @@ function initAppShell() {
   loadAllData();
 
   // 30s background poll
-  setInterval(loadAllData, 30000);
+  setInterval(() => {
+    if (state.autoRefresh !== false) {
+      loadAllData();
+    }
+  }, 30000);
 
   // Visibility Change Auto Refresh
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible") {
+    if (document.visibilityState === "visible" && state.autoRefresh !== false) {
       loadAllData();
     }
   });

@@ -85,7 +85,7 @@ export function renderSettingsView(container, reloadData, subRoute = "") {
                   <div class="settings-item-text">页面回到前台或定时自动刷新状态。</div>
                 </div>
                 <label class="switch">
-                  <input type="checkbox" id="autoRefreshSwitch" checked aria-label="自动刷新" />
+                  <input type="checkbox" id="autoRefreshSwitch" ${state.autoRefresh !== false ? "checked" : ""} aria-label="自动刷新" />
                   <span class="switch-track"></span>
                 </label>
               </div>
@@ -364,6 +364,14 @@ export function renderSettingsView(container, reloadData, subRoute = "") {
   if (themeSelect) {
     themeSelect.onchange = () => {
       window.__wechatHubTheme?.set(themeSelect.value);
+    };
+  }
+
+  // Wire Auto Refresh switch
+  const autoRefreshSwitch = container.querySelector("#autoRefreshSwitch");
+  if (autoRefreshSwitch) {
+    autoRefreshSwitch.onchange = () => {
+      setState({ autoRefresh: autoRefreshSwitch.checked });
     };
   }
 
