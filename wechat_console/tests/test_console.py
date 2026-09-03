@@ -11,8 +11,11 @@ import urllib.request
 from pathlib import Path
 
 
+LOCAL_MOCK_APP = Path(__file__).resolve().parent / "mock_core.py"
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
-MOCK_APP = PROJECT_ROOT / "stack" / "mock-core" / "app.py"
+STACK_MOCK_APP = PROJECT_ROOT / "stack" / "mock-core" / "app.py"
+MOCK_APP = LOCAL_MOCK_APP if LOCAL_MOCK_APP.is_file() else STACK_MOCK_APP
+
 spec = importlib.util.spec_from_file_location("wechat_hub_mock_core", MOCK_APP)
 if spec is None or spec.loader is None:  # pragma: no cover
     raise RuntimeError(f"Unable to load Mock Core from {MOCK_APP}")
