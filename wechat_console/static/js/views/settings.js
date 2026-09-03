@@ -9,11 +9,12 @@
  * 6. 高级与诊断 (Core health, contracts, runtime kv, log viewer)
  */
 
-import { state } from "../state.js";
+import { state, setState } from "../state.js";
 import { api } from "../api.js";
 import { escapeHtml, escapeAttr, fmtDateTime, fmtNumber } from "../format.js";
 import { icon } from "../icons.js";
 import { toast } from "../components/toast.js";
+import { capabilitySummary } from "../capabilities.js";
 
 let activeTab = "general"; // "general" | "wechat" | "telegram" | "ai" | "storage" | "diagnostics"
 let loadedLogs = [];
@@ -107,7 +108,7 @@ export function renderSettingsView(container, reloadData, subRoute = "") {
               <div class="settings-item">
                 <div class="settings-item-body">
                   <div class="settings-item-title">运行模式说明</div>
-                  <div class="settings-item-text">默认使用「推荐模式（Beta）— AgentWechat」，每个账号在独立沙箱中运行；「兼容模式 — Legacy」用于向下兼容已有环境。</div>
+                  <div class="settings-item-text">默认使用「推荐模式（Beta）」，每个账号在独立沙箱中运行；「兼容模式」用于向下兼容已有环境。</div>
                 </div>
                 <span class="pill" data-tone="brand">推荐模式（Beta）默认</span>
               </div>
@@ -191,8 +192,8 @@ export function renderSettingsView(container, reloadData, subRoute = "") {
               <div class="settings-item">
                 <div class="avatar avatar-sm">${icon("database", { size: "sm" })}</div>
                 <div class="settings-item-body">
-                  <div class="settings-item-title">Console 本地持久化与归档</div>
-                  <div class="settings-item-text">消息快照、事件游标与收藏附件保存在 Console 自有数据目录中，与 Core 解耦。</div>
+                  <div class="settings-item-title">持久化数据存储</div>
+                  <div class="settings-item-text">消息快照、收藏与归档文件保存在 WeChat Hub 的持久化数据目录中。</div>
                 </div>
                 <span class="pill">持久化存储</span>
               </div>
@@ -217,22 +218,54 @@ export function renderSettingsView(container, reloadData, subRoute = "") {
       } else {
         accountsKvHtml = runtimeAccounts
           .map((a) => {
-            const pids = Array.isArray(a.pids) ? a.pids.join(", ") : a.pid || "--";
+            const coreAcc = (state.accounts || []).find((ca) => ca.account_id === a.account_id);
+            const pids = Array.isArray(a.pids) ? a.pids.join(", ") : (a.pid !== undefined && a.pid !== null ? String(a.pid) : "--");
+            const senderCaps = capabilitySummary(coreAcc, a);
+
+            let windowsCount = "--";
+            if (Array.isArray(a.windows)) {
+              windowsCount = a.windows.length;
+            } else if (Array.isArray(a.probe?.windows)) {
+              windowsCount = a.probe.windows.length;
+            } else if (Array.isArray(a.runtime_details?.windows)) {
+              windowsCount = a.runtime_details.windows.length;
+            } else if (a.probe?.windows_count !== undefined && a.probe?.windows_count !== null) {
+              windowsCount = a.probe.windows_count;
+            } else if (a.windows_count !== undefined && a.windows_count !== null) {
+              windowsCount = a.windows_count;
+            } else if (a.runtime_details?.windows_count !== undefined && a.runtime_details?.windows_count !== null) {
+              windowsCount = a.runtime_details.windows_count;
+            } else if (typeof a.windows === "number") {
+              windowsCount = a.windows;
+            }
+
+            const hotReload = state.runtimeManagement?.registry_hot_reload !== undefined
+              ? (state.runtimeManagement.registry_hot_reload ? "支持" : "关闭")
+              : (a.registry_hot_reload !== undefined ? (a.registry_hot_reload ? "支持" : "关闭") : "--");
+            const cursor = a.cursor ?? (a.event_cursor ?? (coreAcc?.cursor ?? (state.status?.sync?.cursor ?? (state.status?.cursor ?? (state.status?.messages?.cursor ?? "--")))));
+            const lastSync = a.last_synced_at ?? (a.last_sync ?? (coreAcc?.last_event_at ?? (coreAcc?.last_synced_at ?? (state.status?.sync?.last_synced_at ?? (state.status?.sync?.at ?? (state.status?.last_synced_at ?? "--"))))));
+
             return `
               <div style="padding: 16px; border-bottom: 1px solid var(--border);">
                 <div style="font-weight: var(--fw-semibold); margin-bottom: 8px;">${escapeHtml(
                   a.display_name || a.account_id
                 )} (${escapeHtml(a.account_id)})</div>
                 <dl class="kv">
+                  <div><dt>account_id</dt><dd class="mono">${escapeHtml(a.account_id || "--")}</dd></div>
                   <div><dt>runtime_provider</dt><dd>${escapeHtml(a.runtime_provider || "legacy")}</dd></div>
-                  <div><dt>runtime_health</dt><dd>${escapeHtml(a.runtime_health || (a.running ? "running" : "stopped"))}</dd></div>
-                  <div><dt>agent_server_healthy</dt><dd>${escapeHtml(String(a.agent_server_healthy ?? "--"))}</dd></div>
+                  <div><dt>runtime_health</dt><dd>${escapeHtml(a.runtime_health || (a.running ? "running" : (a.stopped ? "stopped" : "--")))}</dd></div>
+                  <div><dt>agent_server_healthy</dt><dd>${escapeHtml(String(a.agent_server_healthy ?? (a.probe?.healthy ?? "--")))}</dd></div>
                   <div><dt>PID</dt><dd class="mono">${escapeHtml(String(pids))}</dd></div>
-                  <div><dt>UID</dt><dd class="mono">${escapeHtml(String(a.uid ?? "--"))}</dd></div>
-                  <div><dt>Display</dt><dd class="mono">${escapeHtml(String(a.display ?? "--"))}</dd></div>
-                  <div><dt>HOME</dt><dd class="mono">${escapeHtml(String(a.home || "--"))}</dd></div>
-                  <div><dt>Image</dt><dd class="mono" style="word-break: break-all;">${escapeHtml(String(a.current_image || a.image || "--"))}</dd></div>
-                  <div><dt>自动启动</dt><dd>${a.autostart ? "true" : "false"}</dd></div>
+                  <div><dt>UID</dt><dd class="mono">${escapeHtml(String(a.uid ?? (a.runtime_details?.uid ?? "--")))}</dd></div>
+                  <div><dt>Display</dt><dd class="mono">${escapeHtml(String(a.display || a.runtime_details?.display || "--"))}</dd></div>
+                  <div><dt>HOME</dt><dd class="mono">${escapeHtml(String(a.home || a.runtime_details?.home || "--"))}</dd></div>
+                  <div><dt>image</dt><dd class="mono" style="word-break: break-all;">${escapeHtml(String(a.current_image || a.image || a.runtime_details?.image || "--"))}</dd></div>
+                  <div><dt>autostart</dt><dd>${a.autostart !== undefined && a.autostart !== null ? (a.autostart ? "true" : "false") : "--"}</dd></div>
+                  <div><dt>sender capability</dt><dd class="mono">${escapeHtml(senderCaps)}</dd></div>
+                  <div><dt>窗口数</dt><dd class="mono">${escapeHtml(String(windowsCount))}</dd></div>
+                  <div><dt>registry hot reload</dt><dd>${escapeHtml(hotReload)}</dd></div>
+                  <div><dt>事件游标</dt><dd class="mono">${escapeHtml(String(cursor))}</dd></div>
+                  <div><dt>最近同步</dt><dd class="mono">${escapeHtml(String(lastSync))}</dd></div>
                 </dl>
               </div>
             `;

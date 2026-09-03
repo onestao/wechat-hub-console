@@ -358,6 +358,27 @@ export function renderSavedView(container, reloadData) {
     };
   }
 
+  // Wire Single Item Archive retry buttons
+  container.querySelectorAll("button[data-archive-retry]").forEach((btn) => {
+    btn.onclick = async (e) => {
+      e.stopPropagation();
+      const savedId = btn.dataset.archiveRetry;
+      if (!savedId) return;
+
+      btn.disabled = true;
+      btn.textContent = "正在归档…";
+      try {
+        await api.archiveSaved(savedId);
+        toast({ title: "已重新触发附件归档", tone: "good" });
+        await reloadData();
+      } catch (err) {
+        toast({ title: "归档重试失败", text: err.message, tone: "bad" });
+        btn.disabled = false;
+        btn.textContent = "重试归档";
+      }
+    };
+  });
+
   // Wire Delete button
   const deleteBtn = container.querySelector("#savedDeleteBtn");
   if (deleteBtn && selectedItem) {

@@ -15,7 +15,7 @@ import { escapeHtml, fmtWhen, initial } from "../format.js";
 import { icon } from "../icons.js";
 import { showMenu } from "../components/menu.js";
 import { showAccountDrawer } from "../components/detail-drawer.js";
-import { startLogin } from "../components/login-flow.js";
+import { startLogin, openDesktopEntry } from "../components/login-flow.js";
 import { confirmAction } from "../components/confirm.js";
 import { toast } from "../components/toast.js";
 import { api } from "../api.js";
@@ -73,6 +73,32 @@ export function renderHomeView(container, reloadData) {
 
   // Check if completely empty
   if (vms.length === 0) {
+    const management = state.runtimeManagement || {};
+    const runtimeAvailable = Boolean(management.ok || (management.configured && management.available));
+
+    if (!runtimeAvailable) {
+      container.innerHTML = `
+        <div class="page-inner">
+          <div class="page-head">
+            <div>
+              <div class="page-title">首页</div>
+              <p class="page-subtitle">这台 NAS 上的微信现在怎么样。</p>
+            </div>
+          </div>
+          <div class="surface">
+            <div class="empty">
+              <div class="empty-icon">${icon("alertTriangle")}</div>
+              <div class="empty-title">微信管理暂时不可用</div>
+              <p class="empty-text">已存在的消息仍然可以查看。</p>
+              <button class="btn btn-secondary" id="homeRetryRuntimeBtn">重试</button>
+            </div>
+          </div>
+        </div>
+      `;
+      container.querySelector("#homeRetryRuntimeBtn").onclick = reloadData;
+      return;
+    }
+
     container.innerHTML = `
       <div class="page-inner">
         <div class="page-head">
@@ -290,7 +316,10 @@ export function renderHomeView(container, reloadData) {
 
 async function handleAction(action, vm, reloadData) {
   switch (action) {
-    case "open":
+    case "open": {
+      openDesktopEntry(vm.accountId);
+      break;
+    }
     case "messages": {
       state.activeAccountId = vm.accountId;
       navigate("messages");

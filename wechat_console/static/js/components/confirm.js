@@ -1,6 +1,6 @@
 /* Action Confirmation Dialog.
  *
- * Replaces window.confirm() and window.alert() with accessible native <dialog>.
+ * Accessible native dialog replacement for standard confirmation flows.
  */
 
 import { escapeHtml } from "../format.js";
@@ -102,3 +102,5 @@ export function confirmAction({
     });
   });
 }
+
+window.confirmAction = confirmAction;

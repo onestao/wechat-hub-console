@@ -27,12 +27,16 @@ function ensureStack() {
  * @param {"good"|"bad"|"warn"|"info"} [options.tone="good"]
  * @param {number} [options.duration=4000]
  */
-export function toast({
-  title = "",
-  text = "",
-  tone = "good",
-  duration = 4000,
-} = {}) {
+export function toast(options = {}) {
+  if (typeof options === "string") {
+    options = { title: options, tone: arguments[1] || "good" };
+  }
+  const {
+    title = "",
+    text = "",
+    tone = "good",
+    duration = 4000,
+  } = options;
   const stack = ensureStack();
   const toastEl = document.createElement("div");
   toastEl.className = "toast";

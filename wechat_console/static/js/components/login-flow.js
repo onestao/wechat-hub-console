@@ -142,6 +142,8 @@ export function resolveLoginPhase(payload) {
   if (payload.state === "online") return "online";
   if (payload.state === "stopped") return "stopped";
   if (
+    payload.state === "error" ||
+    payload.state === "timeout" ||
     payload.login_flow_state === "error" ||
     payload.login_flow_state === "timeout" ||
     Boolean(payload.login_flow_error)
@@ -463,14 +465,18 @@ export async function openDesktopEntry(accountId) {
         }
       }
       if (!url && !isAgentWechat && state.status?.desktop_url) {
-        url = state.status.desktop_url;
+        url = state.status.desktop_url.includes("{account_id}")
+          ? state.status.desktop_url.replace(/\{account_id\}/g, encodeURIComponent(accountId))
+          : state.status.desktop_url;
       }
     } catch (apiErr) {
       const account = (state.runtimeAccounts || []).find((a) => a.account_id === accountId) ||
                       (state.accounts || []).find((a) => a.account_id === accountId);
       const provider = account?.runtime_provider || account?.runtime?.runtime_provider || "legacy";
       if (provider !== "agent_wechat" && state.status?.desktop_url) {
-        url = state.status.desktop_url;
+        url = state.status.desktop_url.includes("{account_id}")
+          ? state.status.desktop_url.replace(/\{account_id\}/g, encodeURIComponent(accountId))
+          : state.status.desktop_url;
       } else {
         throw apiErr;
       }
@@ -485,3 +491,5 @@ export async function openDesktopEntry(accountId) {
     toast({ title: "打开桌面失败", text: err.message, tone: "bad" });
   }
 }
+
+window.__loginFlowModule = { resolveLoginPhase, startLogin, stopPolling, openDesktopEntry };

@@ -4,7 +4,7 @@
 - **执行依据**：`docs/WEBUI_REDESIGN_EXECUTION_PLAN.md` / `docs/WEBUI_VISUAL_REDESIGN_TASKBOOK.md`
 - **设计说明**：`work/console/docs/WEBUI_DESIGN_V2.md`
 - **日期**：2026-09-02
-- **状态**：Phase A ~ Phase F 全阶段完成，代码全部落盘，自动化与保真 QA 100% 通过
+- **状态**：Phase A ~ Phase F 重构与审阅补修全阶段完成，代码全部落盘，自动化与保真 QA 全部通过（详细补修见 WEBUI_V2_REVIEW_FIX_COMPLETION_REPORT.md）
 
 ---
 
@@ -117,7 +117,8 @@ Phase E/F 浏览器实际运行环境截取的最终保真 QA 截图均落盘于
    - 对 `html[data-theme]`、`window.innerWidth`、`document.documentElement.scrollWidth` 进行零横向溢出断言检查。
 3. **真实组件状态机沙盒（Fixture Harness）**：
    - 通过 `work/console/design_v2/qa/login-states.html`，以原生 ES Module 直接 `import` 生产代码 `static/js/components/login-flow.js` 中的 `renderStage` 函数。
-   - 输入 8 组真实的 Core/Runtime payload（`starting` / `waiting` / `phone_confirm` / `attention` / `online` / `stopped` / `error_timeout` / `degraded`），在浅色与深色下直接验证实际渲染树与 CSS 规则。
+   - 输入 8 组真实的 Core/Runtime payload（`starting` / `waiting` / `phone_confirm` / `attention` / `online` / `stopped` / `error_timeout` / `degraded`），在浅色与深色下直接验证实际渲染树与 CSS 视觉样式（注意：该沙盒仅负责 8 态静态视觉与渲染结构验证）。
+   - 动态轮询生命周期（polling lifecycle）、终端态停止（terminal stop 如 online/error/close）以及 Desktop Gateway/Legacy fallback 均在 Review Fix Playwright QA 端到端测试中严格验证。
 
 ---
 
@@ -150,7 +151,7 @@ Phase E/F 浏览器实际运行环境截取的最终保真 QA 截图均落盘于
 12. **宽屏与窄屏（1920 / 360 两端）**：
     - 1920 宽屏下内容区受 `--content-max` 约束不显空旷；360 窄屏下账号名自适应截断（11ch），全局无水平滚动溢出。
 
-**Fidelity 总体结论**：所有 12 项检查全部达到 100% 像素级吻合，无遗留设计缺陷。
+**Fidelity 总体结论**：与定稿概念保持一致，无重大视觉偏差，关键布局/组件/主题/移动端行为通过保真检查。
 
 ---
 
@@ -175,7 +176,7 @@ Phase E/F 浏览器实际运行环境截取的最终保真 QA 截图均落盘于
 - **Mock Core 契约测试**（`stack/mock-core/tests/test_app.py`）：**6 / 6 测试通过（Ran 6 tests in 0.85s, OK）**。
 - **Stack 拓扑连接测试**（`stack/tests/test_stack_wiring.py`）：**8 / 8 测试通过（Ran 8 tests in 0.01s, OK）**。
 - **静态 JavaScript 语法检查**（`node --check static/**/*.js`）：**23 / 23 模块全部通过**。
-- **调色板 WCAG 审计**（`contrast_audit.py`）：**31 / 31 组文本颜色对全部达到 WCAG AA（4.5:1+）**。
+- **调色板 WCAG 审计**（contrast_audit.py）：**31 / 31 个强制审计组合达到 WCAG AA；另有 2 个文档化例外，其中品牌绿主按钮白字在普通模式低于 4.5:1（2.38:1），prefers-contrast: more 下切换到更深品牌绿（#04803f，5.04:1）满足更高对比度**。
 
 ### 7.2 测试断言调整说明（严格对应执行计划书第 5 节）
 由于前端代码由原 895 行单体拆解为解耦的 ES Modules 模块化架构，原 `test_console.py` 中基于旧单体文件字符串扫描的三处断言进行了等价迁移：
@@ -227,7 +228,9 @@ Phase E/F 浏览器实际运行环境截取的最终保真 QA 截图均落盘于
 
 ## 13. 是否进行真实扫码登录验证
 - **如实说明：否**。本地开发环境无真实 Docker 守护进程与 X11/WeChat 运行时容器。
-- **替代验证方式**：通过真实 Mock Core 契约端点，结合专门构建的 `login-states.html` fixture harness，对真实 `login-flow.js` 组件在全部 8 种登录状态（包括 `waiting` 扫码、`phone_confirm` 手机确认、`attention` 安全验证、`online`、`stopped`、`error/timeout`、`degraded`）下的画面渲染、状态轮询、防缓存及错误处理进行了 100% 完整的自动化覆盖。
+- **替代验证方式**：
+  - `login-states.html` fixture harness：仅负责 `login-flow.js` 在 8 种登录状态（`starting` / `waiting` / `phone_confirm` / `attention` / `online` / `stopped` / `error_timeout` / `degraded`）下的静态视觉排版、白底板与 CSS 渲染结构验证。
+  - 动态状态轮询生命周期（polling lifecycle、防抖与 3s 间隔）、终止态停止轮询（terminal stop: online / error / close）以及 Desktop Gateway / Legacy fallback 等动态交互与网络行为，已在 Review Fix 阶段由独立的 Playwright 端到端 QA（`run_qa_flows_gate15.py`）严格验证通过。
 
 ## 14. AgentWechat Beta 标记是否保留
 - **是**。普通用户层界面始终严格使用「推荐模式（Beta）」文案；技术名称 `AgentWechat` 仅在高级信息抽屉与系统诊断层中展示。
@@ -237,7 +240,7 @@ Phase E/F 浏览器实际运行环境截取的最终保真 QA 截图均落盘于
 ## 15. 主题系统实现验证（必答 15）
 
 - **主题模式支持**：完整支持「跟随系统（System）」、「浅色（Light）」、「深色（Dark）」三档偏好，默认值为跟随系统。
-- **首屏无闪白（Zero FOUC）**：`theme-boot.js` 放置在 `<head>` 最前端作为同步阻塞脚本执行，在 DOM 渲染前即完成 `localStorage` 读取并将 `data-theme` 写入 `<html>` 标签，配合 `:root { color-scheme: light dark }`，深色系统下硬刷新 100% 无闪白。
+- **首屏无闪白（Zero FOUC）**：`theme-boot.js` 放置在 `<head>` 最前端作为同步阻塞脚本执行，在 DOM 渲染前即完成 `localStorage` 读取并将 `data-theme` 写入 `<html>` 标签，配合 `:root { color-scheme: light dark }`，深色系统下硬刷新 无闪白（Zero FOUC）。
 - **系统切换无刷新即时响应**：当偏好设为「跟随系统」时，脚本通过 `matchMedia("(prefers-color-scheme: dark)").addEventListener("change", ...)` 监听系统偏好，操作系统切换深浅色时页面无需刷新即时平滑变换。
 
 ---
@@ -250,7 +253,7 @@ Phase E/F 浏览器实际运行环境截取的最终保真 QA 截图均落盘于
   - 页面左右留白自适应收缩至 12px。
   - 账号行操作按钮下沉为 100% 满宽，触摸热区达到 44px+。
   - 超长账号名称自动执行 11ch 单行省略截断。
-  - 全流程经自动化脚本断言：`scrollWidth === innerWidth`，**100% 无横向滚动条、无文字截断重叠与视窗破版**。
+  - 全流程经自动化脚本断言：`scrollWidth === innerWidth`，**无横向滚动条、无文字截断重叠与视窗破版**。
 
 ---
 

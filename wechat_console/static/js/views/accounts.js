@@ -10,7 +10,7 @@ import { accountViewModel } from "../account-view-model.js";
 import { renderAccountRow } from "../components/account-row.js";
 import { showMenu } from "../components/menu.js";
 import { showAccountDrawer } from "../components/detail-drawer.js";
-import { startLogin } from "../components/login-flow.js";
+import { startLogin, openDesktopEntry } from "../components/login-flow.js";
 import { confirmAction } from "../components/confirm.js";
 import { toast } from "../components/toast.js";
 import { openDialog, closeDialog } from "../components/dialog.js";
@@ -50,7 +50,7 @@ export function renderAccountsView(container, reloadData) {
       <div class="banner" data-tone="warn" style="margin-bottom: var(--sp-3);">
         <div class="banner-body">
           <div class="banner-title">微信管理暂时不可用</div>
-          <div class="banner-text">当前 Core 未配置 Runtime 管理控制通道；已存在的消息仍然可以查看。</div>
+          <div class="banner-text">已存在的消息仍然可以查看。</div>
         </div>
       </div>
     `;
@@ -114,7 +114,7 @@ export function renderAccountsView(container, reloadData) {
           <p class="page-subtitle">管理运行在这台 NAS 上的微信账号。</p>
         </div>
         <div class="page-head-actions">
-          <button class="btn btn-ghost btn-sm" id="accountsRefreshBtn" aria-label="刷新状态">
+          <button class="btn btn-ghost btn-sm" id="accountsRefreshBtn" aria-label="刷新状态" ${!runtimeAvailable ? "disabled" : ""}>
             ${icon("refresh", { size: "sm" })}刷新
           </button>
           <button class="btn btn-primary" id="accountsAddBtn" ${!runtimeAvailable ? "disabled" : ""}>
@@ -134,10 +134,11 @@ export function renderAccountsView(container, reloadData) {
   const refreshBtn = container.querySelector("#accountsRefreshBtn");
   if (refreshBtn) {
     refreshBtn.onclick = async () => {
+      if (!runtimeAvailable) return;
       refreshBtn.disabled = true;
       await reloadData();
       setTimeout(() => {
-        if (refreshBtn) refreshBtn.disabled = false;
+        if (refreshBtn) refreshBtn.disabled = !runtimeAvailable;
       }, 1000);
     };
   }
@@ -173,6 +174,10 @@ export function renderAccountsView(container, reloadData) {
 async function handleAccountAction(action, vm, rowEl, reloadData) {
   switch (action) {
     case "open": {
+      openDesktopEntry(vm.accountId);
+      break;
+    }
+    case "messages": {
       state.activeAccountId = vm.accountId;
       window.location.hash = "#/messages";
       break;
@@ -513,6 +518,12 @@ export function openAddWizard(existingVms = [], reloadData) {
 
 // Listen to global event for opening add wizard
 window.addEventListener("wechat-hub:open-add-wizard", () => {
+  const management = state.runtimeManagement || {};
+  const runtimeAvailable = Boolean(management.ok || (management.configured && management.available));
+  if (!runtimeAvailable) {
+    toast({ title: "微信管理暂时不可用", tone: "warn" });
+    return;
+  }
   openAddWizard(
     (state.runtimeAccounts || []).map((a) => accountViewModel(a, null)),
     async () => {}

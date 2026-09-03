@@ -20,7 +20,9 @@ let mobilePane = "list"; // "list" | "detail"
 
 function readFileAsBase64(file, { imageOnly = false } = {}) {
   return new Promise((resolve, reject) => {
-    if (imageOnly && !file.type.startsWith("image/")) {
+    const isImg = (file.type && file.type.startsWith("image/")) ||
+      /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(file.name || "");
+    if (imageOnly && !isImg) {
       reject(new Error("请选择图片文件（如 PNG、JPEG、GIF 等）"));
       return;
     }
@@ -243,28 +245,64 @@ export function renderMessagesView(container, reloadData) {
         </div>
       `;
     } else if (sr.status === "failed") {
+      let retryBtnHtml = "";
+      if (sr.kind === "image") {
+        retryBtnHtml = `<button class="btn btn-secondary btn-sm" id="msgRetryImageBtn">重新选择图片</button>`;
+      } else if (sr.kind === "file") {
+        retryBtnHtml = `<button class="btn btn-secondary btn-sm" id="msgRetryFileBtn">重新选择文件</button>`;
+      } else {
+        retryBtnHtml = `<button class="btn btn-secondary btn-sm" id="msgRetrySendBtn">重新发送</button>`;
+      }
+
+      const failTitle = sr.kind === "image" ? "图片发送失败" : sr.kind === "file" ? "文件发送失败" : "发送失败";
+      const failText = sr.error || (sr.kind === "image" ? "微信没有接收这张图片，可以重新选择发送。" : sr.kind === "file" ? "微信没有接收该文件，可以重新选择发送。" : "微信没有接收这条消息，可以重新发送。");
+
       sendStatusBannerHtml = `
         <div class="send-result" data-state="failed">
           <div style="color: var(--danger); display: inline-flex;">${icon("alertCircle")}</div>
           <div class="send-result-body">
-            <div class="send-result-title">发送失败</div>
-            <div class="send-result-text">${escapeHtml(sr.error || "微信没有接收这条消息，可以重新发送。")}</div>
+            <div class="send-result-title">${failTitle}</div>
+            <div class="send-result-text">${escapeHtml(failText)}</div>
             <div class="send-result-actions">
-              <button class="btn btn-secondary btn-sm" id="msgRetrySendBtn">重新发送</button>
+              ${retryBtnHtml}
             </div>
           </div>
         </div>
       `;
     } else if (sr.status === "uncertain") {
+      let uncertainActionsHtml = "";
+      if (sr.kind === "image") {
+        uncertainActionsHtml = `
+          <button class="btn btn-secondary btn-sm" id="msgDismissUncertainBtn">查看消息</button>
+          <button class="btn btn-ghost btn-sm" id="msgForceRetryImageBtn">重新选择图片</button>
+        `;
+      } else if (sr.kind === "file") {
+        uncertainActionsHtml = `
+          <button class="btn btn-secondary btn-sm" id="msgDismissUncertainBtn">查看消息</button>
+          <button class="btn btn-ghost btn-sm" id="msgForceRetryFileBtn">重新选择文件</button>
+        `;
+      } else {
+        uncertainActionsHtml = `
+          <button class="btn btn-secondary btn-sm" id="msgDismissUncertainBtn">查看消息</button>
+          <button class="btn btn-ghost btn-sm" id="msgForceRetrySendBtn">仍然重新发送</button>
+        `;
+      }
+
+      const uncertainTitle = sr.kind === "image" ? "图片发送结果未知" : sr.kind === "file" ? "文件发送结果未知" : "发送结果未知";
+      const uncertainText = sr.kind === "image"
+        ? "微信可能已经收到这张图片。为避免重复发送，系统没有自动重试。"
+        : sr.kind === "file"
+          ? "微信可能已经收到该文件。为避免重复发送，系统没有自动重试。"
+          : "微信可能已经收到这条消息。为避免重复发送，系统没有自动重试。";
+
       sendStatusBannerHtml = `
         <div class="send-result" data-state="uncertain">
           <div style="color: var(--warning); display: inline-flex;">${icon("alertTriangle")}</div>
           <div class="send-result-body">
-            <div class="send-result-title">发送结果未知</div>
-            <div class="send-result-text">微信可能已经收到这条消息。为避免重复发送，系统没有自动重试。</div>
+            <div class="send-result-title">${uncertainTitle}</div>
+            <div class="send-result-text">${escapeHtml(uncertainText)}</div>
             <div class="send-result-actions">
-              <button class="btn btn-secondary btn-sm" id="msgDismissUncertainBtn">查看消息</button>
-              <button class="btn btn-ghost btn-sm" id="msgForceRetrySendBtn">仍然重新发送</button>
+              ${uncertainActionsHtml}
             </div>
           </div>
         </div>
@@ -453,6 +491,7 @@ export function renderMessagesView(container, reloadData) {
       sendResult: {
         status: "sending",
         client_request_id: clientRequestId,
+        kind: "text",
         text,
       },
     });
@@ -461,12 +500,13 @@ export function renderMessagesView(container, reloadData) {
     try {
       const receipt = await api.sendText(payload, clientRequestId);
       const sendId = receipt.send_id || clientRequestId;
-      watchSendStatus(sendId, text, container, reloadData);
+      watchSendStatus(sendId, { kind: "text", text }, container, reloadData);
     } catch (err) {
       setState({
         sendResult: {
           status: "failed",
           error: err.message,
+          kind: "text",
           text,
         },
       });
@@ -501,6 +541,8 @@ export function renderMessagesView(container, reloadData) {
         sendResult: {
           status: "sending",
           client_request_id: clientRequestId,
+          kind: "image",
+          filename: file.name,
           text: `[图片: ${file.name}]`,
         },
       });
@@ -518,13 +560,15 @@ export function renderMessagesView(container, reloadData) {
         };
         const receipt = await api.sendImage(payload, clientRequestId);
         const sendId = receipt.send_id || clientRequestId;
-        watchSendStatus(sendId, `[图片: ${file.name}]`, container, reloadData);
+        watchSendStatus(sendId, { kind: "image", filename: file.name, text: `[图片: ${file.name}]` }, container, reloadData);
       } catch (err) {
-        toast(err.message, "bad");
+        toast({ title: err.message, tone: "bad" });
         setState({
           sendResult: {
             status: "failed",
             error: err.message,
+            kind: "image",
+            filename: file.name,
             text: `[图片: ${file.name}]`,
           },
         });
@@ -552,6 +596,8 @@ export function renderMessagesView(container, reloadData) {
         sendResult: {
           status: "sending",
           client_request_id: clientRequestId,
+          kind: "file",
+          filename: file.name,
           text: `[文件: ${file.name}]`,
         },
       });
@@ -569,13 +615,15 @@ export function renderMessagesView(container, reloadData) {
         };
         const receipt = await api.sendFile(payload, clientRequestId);
         const sendId = receipt.send_id || clientRequestId;
-        watchSendStatus(sendId, `[文件: ${file.name}]`, container, reloadData);
+        watchSendStatus(sendId, { kind: "file", filename: file.name, text: `[文件: ${file.name}]` }, container, reloadData);
       } catch (err) {
-        toast(err.message, "bad");
+        toast({ title: err.message, tone: "bad" });
         setState({
           sendResult: {
             status: "failed",
             error: err.message,
+            kind: "file",
+            filename: file.name,
             text: `[文件: ${file.name}]`,
           },
         });
@@ -588,11 +636,36 @@ export function renderMessagesView(container, reloadData) {
 
   // Wire send result actions
   const retrySendBtn = container.querySelector("#msgRetrySendBtn");
-  if (retrySendBtn && state.sendResult?.text) {
+  if (retrySendBtn) {
     retrySendBtn.onclick = () => {
-      if (textarea) textarea.value = state.sendResult.text;
+      const textToRetry = state.sendResult?.text || "";
       setState({ sendResult: null });
       renderMessagesView(container, reloadData);
+      const newTextarea = container.querySelector("#composerTextarea");
+      if (newTextarea) {
+        newTextarea.value = textToRetry;
+        newTextarea.focus();
+      }
+    };
+  }
+
+  const retryImageBtn = container.querySelector("#msgRetryImageBtn");
+  if (retryImageBtn) {
+    retryImageBtn.onclick = () => {
+      setState({ sendResult: null });
+      renderMessagesView(container, reloadData);
+      const newImgInput = container.querySelector("#composerImageInput");
+      newImgInput?.click();
+    };
+  }
+
+  const retryFileBtn = container.querySelector("#msgRetryFileBtn");
+  if (retryFileBtn) {
+    retryFileBtn.onclick = () => {
+      setState({ sendResult: null });
+      renderMessagesView(container, reloadData);
+      const newFileInput = container.querySelector("#composerFileInput");
+      newFileInput?.click();
     };
   }
 
@@ -622,6 +695,42 @@ export function renderMessagesView(container, reloadData) {
     };
   }
 
+  const forceRetryImageBtn = container.querySelector("#msgForceRetryImageBtn");
+  if (forceRetryImageBtn) {
+    forceRetryImageBtn.onclick = async () => {
+      const confirmed = await confirmAction({
+        title: "重新选择图片？",
+        text: "该图片可能已经成功送达对方。再次发送可能导致对方收到重复图片。",
+        confirmLabel: "重新选择",
+        tone: "danger",
+      });
+      if (!confirmed) return;
+
+      setState({ sendResult: null });
+      renderMessagesView(container, reloadData);
+      const newImgInput = container.querySelector("#composerImageInput");
+      newImgInput?.click();
+    };
+  }
+
+  const forceRetryFileBtn = container.querySelector("#msgForceRetryFileBtn");
+  if (forceRetryFileBtn) {
+    forceRetryFileBtn.onclick = async () => {
+      const confirmed = await confirmAction({
+        title: "重新选择文件？",
+        text: "该文件可能已经成功送达对方。再次发送可能导致对方收到重复文件。",
+        confirmLabel: "重新选择",
+        tone: "danger",
+      });
+      if (!confirmed) return;
+
+      setState({ sendResult: null });
+      renderMessagesView(container, reloadData);
+      const newFileInput = container.querySelector("#composerFileInput");
+      newFileInput?.click();
+    };
+  }
+
   // Wire Save buttons
   container.querySelectorAll("button[data-save-msg]").forEach((btn) => {
     btn.onclick = (e) => {
@@ -633,11 +742,15 @@ export function renderMessagesView(container, reloadData) {
   });
 }
 
-function watchSendStatus(sendId, text, container, reloadData) {
+function watchSendStatus(sendId, payloadInfo, container, reloadData) {
   if (activeSendWatcher) {
     clearTimeout(activeSendWatcher);
     activeSendWatcher = null;
   }
+
+  const kind = typeof payloadInfo === "object" ? payloadInfo.kind || "text" : "text";
+  const text = typeof payloadInfo === "object" ? payloadInfo.text : payloadInfo;
+  const filename = typeof payloadInfo === "object" ? payloadInfo.filename : null;
 
   let pollCount = 0;
   const maxPolls = 90;
@@ -656,7 +769,9 @@ function watchSendStatus(sendId, text, container, reloadData) {
           automatic_retry: send.automatic_retry,
           echo_message_id: send.echo_message_id,
           error: send.error,
+          kind,
           text,
+          filename,
         },
       });
 

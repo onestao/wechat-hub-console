@@ -60,8 +60,14 @@ export function capabilitiesOf(account, { coreCapabilities = null } = {}) {
 }
 
 /** Capability summary for the advanced drawer / diagnostics only. */
-export function capabilitySummary(account) {
-  const caps = account?.runtime?.sender_capabilities;
+export function capabilitySummary(account, fallback = null) {
+  const caps =
+    account?.runtime?.sender_capabilities ||
+    account?.sender_capabilities ||
+    account?.capabilities ||
+    fallback?.runtime?.sender_capabilities ||
+    fallback?.sender_capabilities ||
+    fallback?.capabilities;
   if (!caps || typeof caps !== "object") return "--";
   return ["text", "image", "file"].map((key) => `${key}=${caps[key] ? "true" : "false"}`).join(" ");
 }
