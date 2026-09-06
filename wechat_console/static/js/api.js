@@ -60,9 +60,17 @@ export const api = {
 
   runtimeAccounts: () => request("/api/runtime/accounts"),
   createAccount: (payload) => post("/api/runtime/accounts", payload),
+  accountDetail: (accountId) => request(`/api/runtime/accounts/${enc(accountId)}`),
+  updateAccount: (accountId, payload) =>
+    post(`/api/runtime/accounts/${enc(accountId)}/update`, payload),
+  confirmSwitch: (accountId, payload = {}) =>
+    post(`/api/runtime/accounts/${enc(accountId)}/confirm-switch`, payload),
   accountAction: (accountId, action) => post(`/api/runtime/accounts/${enc(accountId)}/${action}`),
   removeAccount: (accountId) =>
     request(`/api/runtime/accounts/${enc(accountId)}`, { method: "DELETE" }),
+
+  /** C2 — avatars are always served same-origin via the Console proxy. */
+  avatarUrl: (identityUuid) => `/api/avatar/${enc(identityUuid)}`,
 
   startLogin: (accountId) => post(`/api/runtime/accounts/${enc(accountId)}/login`),
   loginStatus: (accountId) => request(`/api/runtime/accounts/${enc(accountId)}/login`),

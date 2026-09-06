@@ -109,8 +109,36 @@ class CoreClient:
         rows = payload.get("accounts") or []
         return [row for row in rows if isinstance(row, dict)]
 
+    def account_detail(self, account_id: str) -> dict[str, Any]:
+        """Identity-enriched single account projection (Identity v2 §5.1)."""
+        account = urllib.parse.quote(account_id, safe="")
+        return self._json_request(f"/v1/accounts/{account}")
+
     def runtime_accounts(self) -> dict[str, Any]:
         return self._json_request("/v1/runtime/accounts", timeout=max(self.timeout, 20.0))
+
+    def runtime_account_update(self, account_id: str, *, display_name: str) -> dict[str, Any]:
+        """Update the freely-mutable display_name (alias renames fail closed)."""
+        account = urllib.parse.quote(account_id, safe="")
+        return self._json_request(
+            f"/v1/runtime/accounts/{account}/update",
+            method="POST",
+            payload={"display_name": display_name},
+            timeout=max(self.timeout, 20.0),
+        )
+
+    def confirm_identity_switch(
+        self, account_id: str, *, observed_wechat_user_id: str = ""
+    ) -> dict[str, Any]:
+        """Operator-confirmed identity switch for a slot in mismatch (§5.3)."""
+        account = urllib.parse.quote(account_id, safe="")
+        payload = {"observed_wechat_user_id": observed_wechat_user_id} if observed_wechat_user_id else {}
+        return self._json_request(
+            f"/v1/runtime/accounts/{account}/confirm-switch",
+            method="POST",
+            payload=payload,
+            timeout=max(self.timeout, 20.0),
+        )
 
     def create_runtime_account(
         self,

@@ -6,6 +6,7 @@
 
 import { api } from "../api.js";
 import { state } from "../state.js";
+import { avatarSrcOf } from "../account-view-model.js";
 import { escapeHtml, escapeAttr } from "../format.js";
 import { icon } from "../icons.js";
 import { openDialog, closeDialog } from "./dialog.js";
@@ -16,6 +17,7 @@ let pollTimer = null;
 let currentAccountId = "";
 let currentAccountName = "";
 let currentCallbacks = {};
+let currentProfile = null; // C5 — identity-enriched detail fetched at online
 
 function ensureLoginDialog() {
   if (loginDialogEl && document.body.contains(loginDialogEl)) return loginDialogEl;
@@ -49,6 +51,7 @@ export async function startLogin(accountId, accountName = "", callbacks = {}) {
   currentAccountId = accountId;
   currentAccountName = accountName || accountId;
   currentCallbacks = callbacks;
+  currentProfile = null;
 
   const dialog = ensureLoginDialog();
   stopPolling();
@@ -108,7 +111,28 @@ async function pollStatus() {
       return "stopped";
     }
     const phase = resolveLoginPhase(status);
-    renderStage(loginDialogEl, status);
+    let stagePayload = status;
+    if (phase === "online" && !currentProfile) {
+      // C5 — fetch the identity-enriched detail once so the success stage can
+      // show the real WeChat nickname/avatar, not just the Hub display_name.
+      try {
+        currentProfile = await api.accountDetail(currentAccountId);
+      } catch (profileErr) {
+        console.warn("account detail unavailable for login success stage:", profileErr);
+        currentProfile = {};
+      }
+    }
+    if (currentProfile) {
+      stagePayload = {
+        ...status,
+        display_name:
+          currentProfile.display_name || status.display_name || currentAccountName,
+        wechat_profile: currentProfile.wechat_profile || {},
+        wechat_identity_uuid: currentProfile.wechat_identity_uuid || "",
+        logged_in_user: currentProfile.logged_in_user || status.logged_in_user || "",
+      };
+    }
+    renderStage(loginDialogEl, stagePayload);
 
     if (phase === "online" || phase === "error" || phase === "stopped") {
       stopPolling();
@@ -166,9 +190,16 @@ export function renderStage(dialog, payload) {
   const phase = resolveLoginPhase(payload);
   const isMobile = window.innerWidth <= 767;
 
+  // C5 — the online title prefers the real WeChat identity over the Hub name.
+  const onlineProfile = payload.wechat_profile || {};
+  const onlineRealName =
+    String(onlineProfile.nickname || "").trim() ||
+    String(payload.logged_in_user || "").trim();
+  const onlineTitleName = onlineRealName || name;
+
   let modalTitle = `登录${escapeHtml(name)}`;
   if (phase === "starting") modalTitle = `正在准备${escapeHtml(name)}`;
-  if (phase === "online") modalTitle = `${escapeHtml(name)}已连接`;
+  if (phase === "online") modalTitle = `${escapeHtml(onlineTitleName)}已连接`;
 
   let bodyHtml = "";
   let footHtml = "";
@@ -290,11 +321,45 @@ export function renderStage(dialog, payload) {
     }
 
     case "online": {
+      // C5 — success stage shows the real WeChat identity (nickname/avatar)
+      // with the Hub display_name as a secondary reference.
+      const profile = payload.wechat_profile || {};
+      const nickname = String(profile.nickname || "").trim();
+      const loggedInUser = String(
+        payload.logged_in_user || profile.wechat_user_id || ""
+      ).trim();
+      const hubName = String(payload.display_name || currentAccountName || "微信");
+      const realName = nickname || loggedInUser || "";
+      const headlineName = realName || hubName;
+      const avatarSrc = avatarSrcOf(
+        profile,
+        String(payload.wechat_identity_uuid || "")
+      );
+      const avatarHtml = avatarSrc
+        ? `<img class="avatar-photo login-success-avatar" src="${escapeAttr(
+            avatarSrc
+          )}" alt="" style="display: none;" />`
+        : "";
+      const fallbackGlyph = [...(headlineName || "微")][0] || "微";
       bodyHtml = `
         <div class="login-stage" style="padding: 24px 0" aria-live="polite">
-          <div class="login-success-mark">${icon("check", { size: "lg" })}</div>
-          <div class="login-headline">${escapeHtml(name)}已连接</div>
+          <div class="avatar avatar-lg login-success-avatar-wrap" data-tone="good"><span class="avatar-fallback">${escapeHtml(
+            fallbackGlyph
+          )}</span>${avatarHtml}</div>
+          <div class="login-headline">${escapeHtml(headlineName)}已连接</div>
+          ${
+            realName && hubName && realName !== hubName
+              ? `<p class="login-instruction login-connected-to">已连接到「${escapeHtml(
+                  hubName
+                )}」</p>`
+              : ""
+          }
           <p class="login-instruction">消息正在开始同步。以后 WeChat Hub 会自动启动这个微信。</p>
+          ${
+            loggedInUser
+              ? `<p class="caption mono login-wxid">${escapeHtml(loggedInUser)}</p>`
+              : ""
+          }
         </div>
       `;
       footHtml = `
@@ -381,6 +446,20 @@ export function renderStage(dialog, payload) {
       img.style.display = "none";
       if (fallback) fallback.style.display = "flex";
     };
+  }
+
+  // C5 — success-stage avatar degrades to the glyph fallback on any error.
+  const successAvatar = dialog.querySelector(".login-success-avatar");
+  if (successAvatar) {
+    successAvatar.onload = () => {
+      successAvatar.style.display = "block";
+    };
+    successAvatar.onerror = () => {
+      successAvatar.style.display = "none";
+    };
+    if (successAvatar.complete && successAvatar.naturalWidth > 0) {
+      successAvatar.style.display = "block";
+    }
   }
 
   // Wire buttons

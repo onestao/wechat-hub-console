@@ -8,6 +8,7 @@
 import { state, setState } from "../state.js";
 import { api } from "../api.js";
 import { capabilitiesOf } from "../capabilities.js";
+import { accountSwitchLabel } from "../account-view-model.js";
 import { escapeHtml, escapeAttr, fmtWhen, fmtDateTime, initial } from "../format.js";
 import { icon } from "../icons.js";
 import { confirmAction } from "../components/confirm.js";
@@ -314,7 +315,7 @@ export function renderMessagesView(container, reloadData, options = {}) {
     state.selectedChatId = filteredChats[0].chat_id;
   }
 
-  const selectedChat = allChats.find((c) => c.chat_id === state.selectedChatId) || filteredChats[0] || null;
+    const selectedChat = allChats.find((c) => c.chat_id === state.selectedChatId) || filteredChats[0] || null;
 
   // Check if activeChatKey changed -> trigger scoped loading
   const currentChatKey = `${state.activeAccountId || ""}:${state.selectedChatId || ""}`;
@@ -326,13 +327,13 @@ export function renderMessagesView(container, reloadData, options = {}) {
     fetchScopedMessages(state.activeAccountId, state.selectedChatId, { isNewChat: true });
   }
 
-  // Account Switcher options
+  // Account Switcher options — C8: nickname — display_name, never bare account_id
   const accountSwitcherOptions = accounts
     .map(
       (a) =>
         `<option value="${escapeAttr(a.account_id)}" ${
           a.account_id === state.activeAccountId ? "selected " : ""
-        }>${escapeHtml(a.display_name || a.account_id)}</option>`
+        }>${escapeHtml(accountSwitchLabel(a))}</option>`
     )
     .join("");
 

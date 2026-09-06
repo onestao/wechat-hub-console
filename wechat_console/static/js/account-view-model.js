@@ -11,7 +11,40 @@ import {
   capabilitiesOf,
   capabilitySummary,
 } from "./capabilities.js";
-import { initial, fmtLastActivity, fmtDateTime } from "./format.js";
+import { initial, fmtLastActivity, fmtDateTime, fmtRelative } from "./format.js";
+
+/**
+ * C2 — safe avatar source.  Only same-origin relative paths are used as-is;
+ * absolute http(s) sources are always re-served through the Console avatar
+ * proxy so the browser never has to trust an external URL.
+ * @param {object} [wechatProfile]
+ * @param {string} [identityUuid]
+ * @returns {string}
+ */
+export function avatarSrcOf(wechatProfile = {}, identityUuid = "") {
+  const raw = String(wechatProfile?.avatar_url || "").trim();
+  if (!raw) return "";
+  if (raw.startsWith("/") && !raw.startsWith("//")) return raw;
+  if (/^https?:\/\//i.test(raw) && identityUuid) {
+    return `/api/avatar/${encodeURIComponent(identityUuid)}`;
+  }
+  return "";
+}
+
+/**
+ * C8 — switcher label: nickname — display_name, never a bare account_id.
+ * @param {object} [account]
+ * @returns {string}
+ */
+export function accountSwitchLabel(account) {
+  const profile = account?.wechat_profile || {};
+  const nickname = String(profile?.nickname || "").trim();
+  const hubName = String(account?.display_name || "").trim();
+  const parts = [];
+  if (nickname && nickname !== hubName) parts.push(nickname);
+  if (hubName) parts.push(hubName);
+  return parts.join(" — ") || nickname || hubName || String(account?.account_id || "");
+}
 
 /**
  * Build presentation view model for an account.
@@ -23,7 +56,6 @@ import { initial, fmtLastActivity, fmtDateTime } from "./format.js";
 export function accountViewModel(runtimeAccount, coreAccount, context = {}) {
   const accountId = runtimeAccount?.account_id || coreAccount?.account_id || "";
   const name = runtimeAccount?.display_name || coreAccount?.display_name || accountId;
-  const initialGlyph = initial(name, "微");
   const running = Boolean(runtimeAccount?.running ?? coreAccount?.runtime?.running);
   const provider = providerOf(runtimeAccount || coreAccount);
   const provLabel = providerLabel(runtimeAccount || coreAccount);
@@ -31,6 +63,41 @@ export function accountViewModel(runtimeAccount, coreAccount, context = {}) {
   const isLegacyDefault = Boolean(
     runtimeAccount?.legacy || (!runtimeAccount && coreAccount?.legacy)
   );
+
+  // Identity v2 projection (contract §5.1).
+  const wechatProfile =
+    runtimeAccount?.wechat_profile || coreAccount?.wechat_profile || {};
+  const identityBindingState = String(
+    runtimeAccount?.identity_binding_state ||
+      coreAccount?.identity_binding_state ||
+      ""
+  );
+  const nickname = String(wechatProfile?.nickname || "").trim();
+  const loggedInUser = String(
+    runtimeAccount?.logged_in_user || coreAccount?.logged_in_user || ""
+  ).trim();
+  const wechatUserId = String(wechatProfile?.wechat_user_id || loggedInUser || "").trim();
+  const instanceUuid = String(
+    runtimeAccount?.instance_uuid || coreAccount?.instance_uuid || ""
+  );
+  const identityUuid = String(
+    runtimeAccount?.wechat_identity_uuid || coreAccount?.wechat_identity_uuid || ""
+  );
+  const observedWxid = String(
+    runtimeAccount?.observed_wechat_user_id ||
+      coreAccount?.observed_wechat_user_id ||
+      ""
+  ).trim();
+
+  // C1 fallback chain: nickname → logged_in_user(wxid) → display_name.
+  const wechatName = nickname || loggedInUser || "";
+  const showHubName = Boolean(wechatName) && wechatName !== name;
+  const displayName = wechatName || name;
+  const initialGlyph = initial(displayName, "微");
+  const avatarSrc = avatarSrcOf(wechatProfile, identityUuid);
+  const lastSyncText = coreAccount?.sync?.last_event_at
+    ? fmtRelative(coreAccount.sync.last_event_at)
+    : "";
 
   const caps = capabilitiesOf(runtimeAccount || coreAccount, {
     coreCapabilities: coreAccount?.runtime?.sender_capabilities,
@@ -102,6 +169,16 @@ export function accountViewModel(runtimeAccount, coreAccount, context = {}) {
     primaryAction = { id: "start", label: "启动", variant: "secondary" };
   }
 
+  // C6 — identity mismatch is the highest-priority state: normal primary
+  // actions are blocked until the operator resolves the conflict.
+  const identityMismatch = identityBindingState === "mismatch";
+  if (identityMismatch) {
+    tone = "bad";
+    statusText = "已暂停：登录了另一个微信";
+    hint = "为避免历史消息混在一起，消息同步和发送已暂停";
+    primaryAction = { id: "identity", label: "处理身份冲突", variant: "primary" };
+  }
+
   // Build action menu
   const menu = [];
   if (running) {
@@ -112,6 +189,7 @@ export function accountViewModel(runtimeAccount, coreAccount, context = {}) {
     menu.push({ action: "start", label: "启动", icon: "play" });
   }
   menu.push({ action: "advanced", label: "高级信息", icon: "info" });
+  menu.push({ action: "rename", label: "修改名称", icon: "edit" });
   menu.push({ divider: true });
   menu.push({
     action: "remove",
@@ -125,6 +203,19 @@ export function accountViewModel(runtimeAccount, coreAccount, context = {}) {
   const advanced = {
     accountId,
     name,
+    instanceUuid: instanceUuid || "--",
+    runtimeAlias: String(
+      runtimeAccount?.runtime_alias || coreAccount?.runtime_alias || accountId
+    ),
+    resourceKey: String(
+      runtimeAccount?.resource_key || coreAccount?.resource_key || "--"
+    ),
+    wechatIdentityUuid: identityUuid || "--",
+    wechatUserId: wechatUserId || "--",
+    identityBindingState: identityBindingState || "--",
+    containerId: String(
+      runtimeAccount?.container_id || coreAccount?.runtime?.container_id || "--"
+    ),
     runtimeProvider: provTechnical,
     providerLabel: provLabel,
     coreState: coreAccount?.state || "等待热加载",
@@ -152,7 +243,23 @@ export function accountViewModel(runtimeAccount, coreAccount, context = {}) {
   return {
     accountId,
     name,
+    // C1 — real WeChat identity first, Hub display_name clearly secondary.
+    displayName,
+    wechatName,
+    hubName: name,
+    showHubName,
+    nickname,
+    wechatUserId,
+    identityBindingState,
+    identityMismatch,
+    mismatchInfo: {
+      boundNickname: nickname,
+      boundWxid: wechatUserId,
+      observedWxid,
+    },
+    avatarSrc,
     initial: initialGlyph,
+    lastSyncText,
     tone,
     statusText,
     hint,

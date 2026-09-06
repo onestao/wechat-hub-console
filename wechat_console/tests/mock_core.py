@@ -7,8 +7,10 @@ import argparse
 import base64
 import binascii
 import json
+import struct
 import threading
 import uuid
+import zlib
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
@@ -20,6 +22,37 @@ MAX_INLINE_MEDIA_BYTES = 20 * 1024 * 1024
 SAMPLE_PNG = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
 )
+
+
+def _png_chunk(tag: bytes, data: bytes) -> bytes:
+    return (
+        struct.pack(">I", len(data))
+        + tag
+        + data
+        + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
+    )
+
+
+def _mock_avatar_png(size: int = 64, rgb: tuple[int, int, int] = (7, 193, 96)) -> bytes:
+    """Small dependency-free green-circle PNG used as a fake WeChat avatar."""
+    rows = b""
+    radius = size / 2 - 2
+    for y in range(size):
+        rows += b"\x00"
+        for x in range(size):
+            dx, dy = x - size / 2 + 0.5, y - size / 2 + 0.5
+            px = rgb if dx * dx + dy * dy <= radius * radius else (255, 255, 255)
+            rows += bytes(px)
+    ihdr = struct.pack(">IIBBBBB", size, size, 8, 2, 0, 0, 0)
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + _png_chunk(b"IHDR", ihdr)
+        + _png_chunk(b"IDAT", zlib.compress(rows))
+        + _png_chunk(b"IEND", b"")
+    )
+
+
+MOCK_AVATAR_PNG = _mock_avatar_png()
 
 
 def utc_now() -> str:
@@ -35,9 +68,17 @@ class ApiError(Exception):
         self.details = details or {}
 
 
+IDENTITY_ALPHA_UUID = "c56a4180-65aa-42ec-a945-5fd21dec0538"
+IDENTITY_ALPHA_WXID = "wxid_rpfflqttdz4a22_7fcd"
+INSTANCE_ALPHA_UUID = "11111111-2222-4333-8444-555555555555"
+IDENTITY_GAMMA_BOUND_UUID = "9f1d3a2b-7c44-4e8f-9a10-2b3c4d5e6f70"
+IDENTITY_GAMMA_OBSERVED_WXID = "wxid_new_22222"
+
+
 class MockCoreState:
-    def __init__(self) -> None:
+    def __init__(self, identity_scenario: bool = False) -> None:
         self.lock = threading.RLock()
+        self.base_url = ""
         self.accounts = [
             {
                 "account_id": "account-alpha",
@@ -48,6 +89,14 @@ class MockCoreState:
                 "identity_binding_state": "bound",
                 "runtime": {"display": ":1", "pid": 4101, "healthy": True},
                 "sync": {"healthy": True, "last_event_at": "2026-08-31T07:00:03Z"},
+                "runtime_alias": "alpha",
+                "resource_key": "alpha-7a1b8c2d",
+                "observed_wechat_user_id": "",
+                "wechat_profile": {
+                    "wechat_user_id": "wxid_self_mock",
+                    "nickname": "Mock User",
+                    "avatar_url": "",
+                },
             },
             {
                 "account_id": "account-beta",
@@ -58,8 +107,48 @@ class MockCoreState:
                 "identity_binding_state": "bound",
                 "runtime": {"display": ":1", "pid": 4102, "healthy": True},
                 "sync": {"healthy": True, "last_event_at": "2026-08-31T07:00:02Z"},
+                "runtime_alias": "account-beta",
+                "resource_key": "",
+                "observed_wechat_user_id": "",
+                "wechat_profile": {"wechat_user_id": "", "nickname": "", "avatar_url": ""},
             },
         ]
+        if identity_scenario:
+            # Identity v2 §5.1 projection (Agent C console profile scenario):
+            # alpha is bound to a verified WeChat identity with a profile.
+            self.accounts[0]["instance_uuid"] = INSTANCE_ALPHA_UUID
+            self.accounts[0]["wechat_identity_uuid"] = IDENTITY_ALPHA_UUID
+            self.accounts[0]["wechat_profile"] = {
+                "wechat_user_id": IDENTITY_ALPHA_WXID,
+                "nickname": "科研助手小张",
+                "avatar_url": "",
+            }
+            # Beta never engaged the identity system: profile fallback path.
+            self.accounts[1]["instance_uuid"] = ""
+            self.accounts[1]["wechat_identity_uuid"] = ""
+            self.accounts[1]["identity_binding_state"] = "unbound"
+
+            self.accounts.append(
+                {
+                    "account_id": "account-gamma",
+                    "display_name": "Gamma 微信",
+                    "state": "online",
+                    "runtime": {"display": ":1", "pid": 4103, "healthy": True},
+                    "sync": {"healthy": True, "last_event_at": "2026-08-31T07:00:01Z"},
+                    "instance_uuid": "33333333-2222-4333-8444-555555555555",
+                    "runtime_alias": "gamma",
+                    "resource_key": "gamma-9c8d7e6f",
+                    "wechat_identity_uuid": IDENTITY_GAMMA_BOUND_UUID,
+                    "identity_binding_state": "mismatch",
+                    "observed_wechat_user_id": IDENTITY_GAMMA_OBSERVED_WXID,
+                    "wechat_profile": {
+                        "wechat_user_id": "wxid_old_11111",
+                        "nickname": "老王（原绑定）",
+                        "avatar_url": "",
+                    },
+                }
+            )
+        self._apply_avatar_urls()
         self.chats = {
             "account-alpha": [
                 {
@@ -90,6 +179,8 @@ class MockCoreState:
                 }
             ],
         }
+        if identity_scenario:
+            self.chats["account-gamma"] = []
         self.media = {
             "media-image-1": {
                 "account_id": "account-beta",
@@ -177,6 +268,9 @@ class MockCoreState:
                 },
             ]
         }
+        self.contacts[IDENTITY_ALPHA_UUID] = self.contacts["identity-alpha-uuid"]
+        self.members[(IDENTITY_ALPHA_UUID, "alpha-group-1@chatroom")] = self.members[("identity-alpha-uuid", "alpha-group-1@chatroom")]
+
         self.events = [
             {
                 "event_id": "event-0001",
@@ -237,6 +331,70 @@ class MockCoreState:
                 return account
         raise ApiError(404, "account_not_found", f"Unknown account_id: {account_id}")
 
+    def set_base_url(self, base_url: str) -> None:
+        """Advertise absolute avatar URLs once the server socket is bound."""
+        with self.lock:
+            self.base_url = base_url.rstrip("/")
+            self._apply_avatar_urls()
+
+    def _apply_avatar_urls(self) -> None:
+        if not self.base_url:
+            return
+        for account in self.accounts:
+            profile = account.get("wechat_profile")
+            if isinstance(profile, dict) and profile.get("wechat_user_id"):
+                profile["avatar_url"] = (
+                    f"{self.base_url}/v1/mock-avatars/{profile['wechat_user_id']}.png"
+                )
+
+    def account_detail(self, account_id: str) -> dict[str, Any]:
+        return dict(self.account(account_id))
+
+    def update_display_name(self, account_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        if set(payload) - {"display_name"}:
+            raise ApiError(
+                400,
+                "invalid_request",
+                f"update accepts only display_name; unexpected fields: {sorted(set(payload) - {'display_name'})}",
+            )
+        display_name = str(payload.get("display_name") or "").strip()
+        if not display_name:
+            raise ApiError(400, "invalid_request", "display_name must be a non-empty string")
+        with self.lock:
+            self.account(account_id)["display_name"] = display_name
+        return {
+            "account": {"id": account_id, "display_name": display_name},
+            "registry_reload": {"ok": True, "changed": True, "added": [], "removed": [], "updated": [account_id]},
+        }
+
+    def confirm_identity_switch(self, account_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        with self.lock:
+            account = self.account(account_id)
+            if account.get("identity_binding_state") != "mismatch":
+                raise ApiError(409, "identity_not_mismatch", f"account {account_id} is not in mismatch state")
+            observed = str(
+                payload.get("observed_wechat_user_id")
+                or account.get("observed_wechat_user_id")
+                or ""
+            ).strip()
+            account["identity_binding_state"] = "bound"
+            account["observed_wechat_user_id"] = ""
+            account["wechat_identity_uuid"] = IDENTITY_GAMMA_BOUND_UUID
+            account["wechat_profile"] = {
+                "wechat_user_id": observed,
+                "nickname": "新微信小赵",
+                "avatar_url": "",
+            }
+            return {
+                "ok": True,
+                "account_id": account_id,
+                "instance_uuid": account.get("instance_uuid") or "",
+                "identity_binding_state": "bound",
+                "wechat_identity_uuid": account["wechat_identity_uuid"],
+                "wechat_user_id": observed,
+                "previous_state": "mismatch",
+            }
+
     def chat(self, account_id: str, chat_id: str) -> dict[str, Any]:
         self.account(account_id)
         for chat in self.chats.get(account_id, []):
@@ -252,42 +410,52 @@ class MockCoreState:
                 pid = runtime.get("pid")
                 running = account.get("state") not in {"stopped", "offline"} and bool(pid)
                 provider = str(runtime.get("runtime_provider") or "legacy")
-                rows.append(
-                    {
-                        "account_id": account["account_id"],
-                        "display_name": account.get("display_name") or account["account_id"],
-                        "runtime_provider": provider,
-                        "enabled": True,
-                        "autostart": True,
-                        "legacy": False,
-                        "username": (
-                            f"agent_{account['account_id'].replace('-', '_')}"
-                            if provider == "agent_wechat"
-                            else f"wx_{account['account_id'].replace('-', '_')}"
-                        ),
-                        "uid": None if provider == "agent_wechat" else 22000 + len(rows),
-                        "home": (
-                            f"/config/agent-wechat/{account['account_id']}/home"
-                            if provider == "agent_wechat"
-                            else f"/config/wechat-accounts/{account['account_id']}/home"
-                        ),
-                        "display": "isolated" if provider == "agent_wechat" else runtime.get("display") or ":1",
-                        "running": running,
-                        "container_running": running if provider == "agent_wechat" else running,
-                        "agent_server_healthy": True if provider == "agent_wechat" and running else None,
-                        "runtime_health": "healthy" if provider == "agent_wechat" and running else ("stopped" if not running else "healthy"),
-                        "wechat_login_status": "logged_in" if provider == "agent_wechat" and account.get("state") == "online" else "unknown",
-                        "pids": [pid] if running else [],
-                        "windows": (
-                            []
-                            if provider == "agent_wechat"
-                            else ([{"window_id": pid + 100, "pid": pid, "title": "Weixin"}] if running else [])
-                        ),
-                        "window_error": None,
-                        "container_name": f"wechat-agent-{account['account_id']}" if provider == "agent_wechat" else "",
-                        "current_image": "ghcr.io/thisnick/agent-wechat:0.11.15" if provider == "agent_wechat" else "",
-                    }
-                )
+                row = {
+                    "account_id": account["account_id"],
+                    "display_name": account.get("display_name") or account["account_id"],
+                    "runtime_provider": provider,
+                    "enabled": True,
+                    "autostart": True,
+                    "legacy": False,
+                    "username": (
+                        f"agent_{account['account_id'].replace('-', '_')}"
+                        if provider == "agent_wechat"
+                        else f"wx_{account['account_id'].replace('-', '_')}"
+                    ),
+                    "uid": None if provider == "agent_wechat" else 22000 + len(rows),
+                    "home": (
+                        f"/config/agent-wechat/{account['account_id']}/home"
+                        if provider == "agent_wechat"
+                        else f"/config/wechat-accounts/{account['account_id']}/home"
+                    ),
+                    "display": "isolated" if provider == "agent_wechat" else runtime.get("display") or ":1",
+                    "running": running,
+                    "container_running": running if provider == "agent_wechat" else running,
+                    "agent_server_healthy": True if provider == "agent_wechat" and running else None,
+                    "runtime_health": "healthy" if provider == "agent_wechat" and running else ("stopped" if not running else "healthy"),
+                    "wechat_login_status": "logged_in" if provider == "agent_wechat" and account.get("state") == "online" else "unknown",
+                    "pids": [pid] if running else [],
+                    "windows": (
+                        []
+                        if provider == "agent_wechat"
+                        else ([{"window_id": pid + 100, "pid": pid, "title": "Weixin"}] if running else [])
+                    ),
+                    "window_error": None,
+                    "container_name": f"wechat-agent-{account['account_id']}" if provider == "agent_wechat" else "",
+                    "current_image": "ghcr.io/thisnick/agent-wechat:0.11.15" if provider == "agent_wechat" else "",
+                }
+                for key in (
+                    "instance_uuid",
+                    "runtime_alias",
+                    "resource_key",
+                    "wechat_identity_uuid",
+                    "identity_binding_state",
+                    "observed_wechat_user_id",
+                    "wechat_profile",
+                ):
+                    if key in account:
+                        row[key] = account[key]
+                rows.append(row)
         return {
             "accounts": rows,
             "registry_reload": {"ok": True, "changed": False, "added": [], "removed": [], "updated": []},
@@ -578,6 +746,18 @@ class MockCoreHandler(BaseHTTPRequestHandler):
             if path == "/v1/accounts":
                 self._json(200, {"accounts": self.state.accounts})
                 return
+            if path.startswith("/v1/mock-avatars/"):
+                self.send_response(200)
+                self.send_header("Content-Type", "image/png")
+                self.send_header("Content-Length", str(len(MOCK_AVATAR_PNG)))
+                self.send_header("Cache-Control", "public, max-age=300")
+                self.end_headers()
+                self.wfile.write(MOCK_AVATAR_PNG)
+                return
+            accounts_prefix = "/v1/accounts/"
+            if path.startswith(accounts_prefix) and path.rstrip("/").count("/") == 3:
+                self._json(200, self.state.account_detail(unquote(path[len(accounts_prefix):])))
+                return
             if path == "/v1/runtime/accounts":
                 self._json(200, self.state.runtime_accounts())
                 return
@@ -673,6 +853,10 @@ class MockCoreHandler(BaseHTTPRequestHandler):
                 })
                 return
             if path.startswith("/v1/avatar/") or path.startswith("/api/avatar/") or (path.startswith("/v1/identities/") and path.endswith("/avatar")):
+                prefix = "/v1/avatar/" if path.startswith("/v1/avatar/") else ("/api/avatar/" if path.startswith("/api/avatar/") else "/v1/identities/")
+                avatar_k = unquote(path[len(prefix):].strip("/").replace("/avatar", ""))
+                if avatar_k == "00000000-0000-4000-8000-000000000000" or avatar_k.startswith("00000000-"):
+                    raise ApiError(404, "avatar_not_found", f"Avatar not found for {avatar_k}")
                 content = SAMPLE_PNG
                 self.send_response(200)
                 self.send_header("Content-Type", "image/png")
@@ -722,6 +906,12 @@ class MockCoreHandler(BaseHTTPRequestHandler):
                     if parts[1] == "login":
                         self._json(202, self.state.runtime_login_start(unquote(parts[0])))
                         return
+                    if parts[1] == "update":
+                        self._json(200, self.state.update_display_name(unquote(parts[0]), payload))
+                        return
+                    if parts[1] == "confirm-switch":
+                        self._json(200, self.state.confirm_identity_switch(unquote(parts[0]), payload))
+                        return
                     self._json(200, self.state.runtime_action(unquote(parts[0]), parts[1]))
                     return
             send_prefix = "/v1/send/"
@@ -751,8 +941,11 @@ class MockCoreHandler(BaseHTTPRequestHandler):
 
 
 def create_server(host: str, port: int, state: MockCoreState | None = None) -> ThreadingHTTPServer:
-    handler = type("BoundMockCoreHandler", (MockCoreHandler,), {"state": state or MockCoreState()})
-    return ThreadingHTTPServer((host, port), handler)
+    resolved = state or MockCoreState()
+    handler = type("BoundMockCoreHandler", (MockCoreHandler,), {"state": resolved})
+    server = ThreadingHTTPServer((host, port), handler)
+    resolved.set_base_url(f"http://127.0.0.1:{server.server_port}")
+    return server
 
 
 def main(argv: list[str] | None = None) -> int:

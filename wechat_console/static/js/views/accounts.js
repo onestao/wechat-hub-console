@@ -7,9 +7,10 @@
 import { state } from "../state.js";
 import { api } from "../api.js";
 import { accountViewModel } from "../account-view-model.js";
-import { renderAccountRow } from "../components/account-row.js";
+import { renderAccountRow, wireAccountAvatars } from "../components/account-row.js";
 import { showMenu } from "../components/menu.js";
 import { showAccountDrawer } from "../components/detail-drawer.js";
+import { showIdentityMismatchDialog } from "../components/identity-mismatch.js";
 import { startLogin, openDesktopEntry } from "../components/login-flow.js";
 import { confirmAction } from "../components/confirm.js";
 import { toast } from "../components/toast.js";
@@ -143,6 +144,8 @@ export function renderAccountsView(container, reloadData) {
     };
   }
 
+  wireAccountAvatars(container);
+
   const retryBtn = container.querySelector("#accountsRetryRuntimeBtn");
   if (retryBtn) retryBtn.onclick = reloadData;
 
@@ -206,6 +209,14 @@ async function handleAccountAction(action, vm, rowEl, reloadData) {
       showAccountDrawer(vm.advanced);
       break;
     }
+    case "rename": {
+      openRenameDialog(vm, reloadData);
+      break;
+    }
+    case "identity": {
+      showIdentityMismatchDialog(vm, { onResolved: reloadData });
+      break;
+    }
     case "remove": {
       if (vm.isLegacyDefault) {
         toast({ title: "兼容模式默认微信不可移除", tone: "warn" });
@@ -236,6 +247,114 @@ async function handleAccountAction(action, vm, rowEl, reloadData) {
       break;
     }
   }
+}
+
+/**
+ * C3 — display_name rename closed loop: dialog → API → toast → reload.
+ * Renaming never touches instance_uuid / resource_key; the technical alias
+ * (runtime_alias) is frozen in this release and shown read-only.
+ * @param {ReturnType<import("../account-view-model.js").accountViewModel>} vm
+ * @param {() => Promise<void>} reloadData
+ */
+function openRenameDialog(vm, reloadData) {
+  let dialog = document.getElementById("renameAccountDialog");
+  if (!dialog) {
+    dialog = document.createElement("dialog");
+    dialog.id = "renameAccountDialog";
+    dialog.className = "modal";
+    document.body.appendChild(dialog);
+  }
+
+  dialog.innerHTML = `
+    <div class="modal-shell">
+      <div class="modal-head">
+        <div class="modal-head-text">
+          <div class="modal-title">修改名称</div>
+          <p class="modal-subtitle">这是 WeChat Hub 里的备注名，随时可以改。</p>
+        </div>
+        <button class="btn btn-icon" id="renameCloseBtn" aria-label="关闭修改名称">
+          ${icon("close")}
+        </button>
+      </div>
+      <form id="renameAccountForm" class="modal-body" novalidate>
+        <div class="field" id="renameField">
+          <label class="label" for="renameInput">备注名称</label>
+          <input class="input" id="renameInput" name="display_name"
+            value="${escapeAttr(vm.hubName || vm.displayName || "")}"
+            placeholder="例如：工作微信、个人微信" maxlength="64" required />
+          <p class="field-hint">微信的真实昵称和头像来自微信本身，不受这个名称影响。改名不会影响底层数据和容器。</p>
+          <p class="field-error" id="renameError" style="display: none;"></p>
+        </div>
+        <div class="field">
+          <label class="label" for="renameAlias">技术别名（只读）</label>
+          <input class="input mono" id="renameAlias" value="${escapeAttr(
+            vm.advanced?.runtimeAlias || vm.accountId
+          )}" readonly disabled />
+          <p class="field-hint">当前版本暂不支持修改技术别名。</p>
+        </div>
+      </form>
+      <div class="modal-foot">
+        <button class="btn btn-ghost" id="renameCancelBtn" type="button">取消</button>
+        <button class="btn btn-primary" id="renameSubmitBtn" type="button">保存</button>
+      </div>
+    </div>
+  `;
+
+  const closeBtn = dialog.querySelector("#renameCloseBtn");
+  if (closeBtn) closeBtn.onclick = () => closeDialog(dialog);
+
+  const cancelBtn = dialog.querySelector("#renameCancelBtn");
+  if (cancelBtn) cancelBtn.onclick = () => closeDialog(dialog);
+
+  const input = dialog.querySelector("#renameInput");
+  const errorEl = dialog.querySelector("#renameError");
+  const submitBtn = dialog.querySelector("#renameSubmitBtn");
+
+  const showFieldError = (message) => {
+    if (errorEl) {
+      errorEl.textContent = message;
+      errorEl.style.display = "block";
+    }
+  };
+
+  const handleSubmit = async () => {
+    const newName = (input?.value || "").trim();
+    if (!newName) {
+      showFieldError("请填写名称");
+      return;
+    }
+    if (newName === (vm.hubName || "").trim()) {
+      closeDialog(dialog);
+      return;
+    }
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.textContent = "正在保存…";
+    }
+    try {
+      await api.updateAccount(vm.accountId, { display_name: newName });
+      toast({ title: `已把名称改为「${newName}」`, tone: "good" });
+      closeDialog(dialog);
+      await reloadData();
+    } catch (err) {
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = "保存";
+      }
+      showFieldError(err.message || "保存失败，请稍后重试");
+    }
+  };
+
+  if (submitBtn) submitBtn.onclick = handleSubmit;
+  const form = dialog.querySelector("#renameAccountForm");
+  if (form) {
+    form.onsubmit = (e) => {
+      e.preventDefault();
+      handleSubmit();
+    };
+  }
+
+  openDialog(dialog, { preventCancel: true });
 }
 
 function generateSlug(name, existingIds = []) {
