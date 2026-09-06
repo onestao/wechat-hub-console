@@ -54,6 +54,7 @@ const PATHS = {
   shield: '<path d="M12 4.2 5.5 6.6v5c0 3.7 2.6 7 6.5 8.2 3.9-1.2 6.5-4.5 6.5-8.2v-5z"/>',
   link: '<path d="M10.5 13.5a3.5 3.5 0 0 0 5 0l2.5-2.5a3.5 3.5 0 1 0-5-5l-1.2 1.2"/><path d="M13.5 10.5a3.5 3.5 0 0 0-5 0L6 13a3.5 3.5 0 1 0 5 5l1.2-1.2"/>',
   arrowLeft: '<path d="M19 12H5.5"/><path d="M11 5.5 4.5 12l6.5 6.5"/>',
+  edit: '<path d="M13.8 6.2 17.8 10.2"/><path d="M5.5 18.5 6.1 15.4 15.2 6.3a1.8 1.8 0 0 1 2.5 0l0 0a1.8 1.8 0 0 1 0 2.5L8.6 17.9z"/>',
 };
 
 export const ICON_SPRITE = `<svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true">${Object.entries(

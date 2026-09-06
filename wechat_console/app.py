@@ -12,6 +12,7 @@ import argparse
 import json
 import mimetypes
 import os
+import re
 import shutil
 import threading
 import time
@@ -38,6 +39,11 @@ DEFAULT_RUNTIME_DIR = Path(_runtime_dir) if _runtime_dir else PACKAGE_DIR.parent
 DEFAULT_DB = DEFAULT_RUNTIME_DIR / "console.sqlite"
 DEFAULT_ARCHIVE_DIR = DEFAULT_RUNTIME_DIR / "saved-attachments"
 
+AVATAR_CACHE_TTL_SECONDS = 300.0
+AVATAR_NEGATIVE_TTL_SECONDS = 30.0
+AVATAR_MAX_BYTES = 2 * 1024 * 1024
+AVATAR_ALLOWED_ID = re.compile(r"^[0-9a-fA-F][0-9a-fA-F-]{7,63}$")
+
 
 class ConsoleService:
     def __init__(
@@ -61,6 +67,9 @@ class ConsoleService:
         self._stop = threading.Event()
         self._sync_thread: threading.Thread | None = None
         self._sync_lock = threading.Lock()
+        self._avatar_cache: dict[str, tuple[float, bytes, str]] = {}
+        self._avatar_negative: dict[str, float] = {}
+        self._avatar_lock = threading.Lock()
         self.last_sync: dict[str, Any] = {
             "ok": None,
             "at": "",
@@ -227,6 +236,57 @@ class ConsoleService:
             "efb": _probe_optional("efb-multi", self.efb_url),
         }
 
+    def identity_avatar(self, wechat_identity_uuid: str) -> tuple[bytes, str]:
+        """Serve a WeChat avatar through Console (Identity v2 contract §2.2).
+
+        The browser never trusts an external image URL: the source is resolved
+        exclusively from Core account payloads keyed by
+        ``wechat_identity_uuid``, fetched server-side with strict size and
+        content-type limits, and re-served same-origin with a short TTL cache.
+        """
+        identity_uuid = str(wechat_identity_uuid or "").strip()
+        if not AVATAR_ALLOWED_ID.match(identity_uuid):
+            raise KeyError("avatar not found")
+        now = time.monotonic()
+        with self._avatar_lock:
+            cached = self._avatar_cache.get(identity_uuid)
+            if cached and now - cached[0] < AVATAR_CACHE_TTL_SECONDS:
+                return cached[1], cached[2]
+            if now - self._avatar_negative.get(identity_uuid, float("-inf")) < AVATAR_NEGATIVE_TTL_SECONDS:
+                raise KeyError("avatar not found")
+        avatar_url = self._resolve_identity_avatar_url(identity_uuid)
+        if not avatar_url:
+            with self._avatar_lock:
+                self._avatar_negative[identity_uuid] = now
+            raise KeyError("avatar not found")
+        try:
+            body, mime_type = _fetch_avatar(avatar_url)
+        except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError, ValueError):
+            with self._avatar_lock:
+                self._avatar_negative[identity_uuid] = now
+            raise KeyError("avatar not found") from None
+        with self._avatar_lock:
+            self._avatar_cache[identity_uuid] = (now, body, mime_type)
+            if len(self._avatar_cache) > 64:  # bounded cache: drop oldest entries
+                for key, _ in sorted(self._avatar_cache.items())[: len(self._avatar_cache) - 64]:
+                    self._avatar_cache.pop(key, None)
+        return body, mime_type
+
+    def _resolve_identity_avatar_url(self, identity_uuid: str) -> str:
+        try:
+            accounts = self.core.accounts()
+        except CoreApiError:
+            return ""
+        for account in accounts:
+            if str(account.get("wechat_identity_uuid") or "") != identity_uuid:
+                continue
+            profile = account.get("wechat_profile")
+            url = str(profile.get("avatar_url") or "").strip() if isinstance(profile, dict) else ""
+            if url.startswith(("https://", "http://")):
+                return url
+            return ""
+        return ""
+
     def chats(self, account_id: str, query: str = "") -> dict[str, Any]:
         if not account_id:
             raise ValueError("account_id is required")
@@ -369,6 +429,19 @@ def _probe_optional(name: str, base_url: str) -> dict[str, Any]:
         }
 
 
+def _fetch_avatar(url: str) -> tuple[bytes, str]:
+    """Fetch avatar bytes server-side under strict size/content-type limits."""
+    request = urllib.request.Request(url, headers={"Accept": "image/*"})
+    with urllib.request.urlopen(request, timeout=5.0) as response:
+        mime_type = response.headers.get_content_type() or ""
+        if not mime_type.startswith("image/"):
+            raise ValueError("avatar source is not an image")
+        body = response.read(AVATAR_MAX_BYTES + 1)
+    if not body or len(body) > AVATAR_MAX_BYTES:
+        raise ValueError("avatar payload exceeds the safe size limit")
+    return body, mime_type
+
+
 def _json_response(handler: BaseHTTPRequestHandler, payload: Any, status: int = 200) -> None:
     body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     handler.send_response(status)
@@ -485,6 +558,24 @@ def create_handler(service: ConsoleService):
                         if account_id and "/" not in account_id:
                             _json_response(self, service.core.runtime_desktop(account_id))
                             return
+                    if runtime_suffix and "/" not in runtime_suffix:
+                        # GET /api/runtime/accounts/{id} — identity-enriched detail
+                        _json_response(self, service.core.account_detail(unquote(runtime_suffix)))
+                        return
+                avatar_prefix = "/api/avatar/"
+                if path.startswith(avatar_prefix):
+                    identity_uuid = unquote(path[len(avatar_prefix) :])
+                    if not identity_uuid or "/" in identity_uuid:
+                        raise KeyError("endpoint not found")
+                    body, mime_type = service.identity_avatar(identity_uuid)
+                    self.send_response(200)
+                    self.send_header("Content-Type", mime_type)
+                    self.send_header("Content-Length", str(len(body)))
+                    self.send_header("Cache-Control", "private, max-age=300")
+                    self.send_header("X-Content-Type-Options", "nosniff")
+                    self.end_headers()
+                    self.wfile.write(body)
+                    return
                 if path == "/api/chats":
                     _json_response(
                         self,
@@ -627,9 +718,24 @@ def create_handler(service: ConsoleService):
                         account_id, action = suffix.rsplit("/", 1)
                         if action == "login":
                             result = service.core.runtime_login_start(account_id)
+                            service.store.log("info", "runtime", f"WeChat account {action}", result)
+                        elif action == "update":
+                            result = service.core.runtime_account_update(
+                                account_id,
+                                display_name=_required_text(payload, "display_name"),
+                            )
+                            service.store.log("info", "runtime", "WeChat account updated", result)
+                        elif action == "confirm-switch":
+                            result = service.core.confirm_identity_switch(
+                                account_id,
+                                observed_wechat_user_id=str(
+                                    payload.get("observed_wechat_user_id") or ""
+                                ).strip(),
+                            )
+                            service.store.log("info", "identity", "Identity switch confirmed", result)
                         else:
                             result = service.core.runtime_account_action(account_id, action)
-                        service.store.log("info", "runtime", f"WeChat account {action}", result)
+                            service.store.log("info", "runtime", f"WeChat account {action}", result)
                         _json_response(self, result)
                         return
                 if path == "/api/send/text":

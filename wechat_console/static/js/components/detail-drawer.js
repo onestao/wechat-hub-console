@@ -41,9 +41,21 @@ export function showAccountDrawer(advanced) {
         </button>
       </div>
       <div class="drawer-body">
+        <p class="kv-section-title">身份与技术标识 <span class="pill" data-tone="neutral">technical</span></p>
+        <dl class="kv">
+          <div><dt>instance_uuid</dt><dd class="mono" style="word-break: break-all;">${escapeHtml(advanced.instanceUuid)}</dd></div>
+          <div><dt>runtime_alias</dt><dd class="mono">${escapeHtml(advanced.runtimeAlias)}</dd></div>
+          <div><dt>resource_key</dt><dd class="mono" style="word-break: break-all;">${escapeHtml(advanced.resourceKey)}</dd></div>
+          <div><dt>wechat_identity_uuid</dt><dd class="mono" style="word-break: break-all;">${escapeHtml(advanced.wechatIdentityUuid)}</dd></div>
+          <div><dt>wechat_user_id</dt><dd class="mono">${escapeHtml(advanced.wechatUserId)}</dd></div>
+          <div><dt>identity_binding_state</dt><dd>${escapeHtml(advanced.identityBindingState)}</dd></div>
+          <div><dt>container_id</dt><dd class="mono" style="word-break: break-all;">${escapeHtml(advanced.containerId)}</dd></div>
+          <div><dt>runtime_provider</dt><dd>${escapeHtml(advanced.runtimeProvider)} (${escapeHtml(advanced.providerLabel)})</dd></div>
+        </dl>
+        <p class="caption" style="margin: 4px 0 16px;">以上为 WeChat Hub 内部技术标识：instance_uuid / resource_key 不可变；runtime_alias 在当前版本只读。</p>
+        <p class="kv-section-title">运行状态</p>
         <dl class="kv">
           <div><dt>account_id</dt><dd class="mono">${escapeHtml(advanced.accountId)}</dd></div>
-          <div><dt>runtime_provider</dt><dd>${escapeHtml(advanced.runtimeProvider)} (${escapeHtml(advanced.providerLabel)})</dd></div>
           <div><dt>Core 状态</dt><dd>${escapeHtml(advanced.coreState)}</dd></div>
           <div><dt>Runtime 状态</dt><dd>${escapeHtml(advanced.runtimeHealth)}</dd></div>
           <div><dt>Agent 服务健康</dt><dd>${escapeHtml(advanced.agentServerHealthy)}</dd></div>

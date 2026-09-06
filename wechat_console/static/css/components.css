@@ -311,6 +311,145 @@
   font-size: var(--fs-label);
 }
 
+.avatar-lg {
+  width: 64px;
+  height: 64px;
+  font-size: calc(var(--fs-item-title) * 1.6);
+}
+
+/* C2 — photo avatar overlays the glyph fallback inside the same box. */
+.avatar {
+  position: relative;
+  overflow: hidden;
+}
+
+.avatar-fallback {
+  display: block;
+  line-height: 1;
+}
+
+.avatar-photo {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
+}
+
+/* C1 — Hub 备注名 is visually distinct from the real WeChat nickname. */
+.hub-name {
+  color: var(--text-secondary);
+  font-size: var(--fs-label);
+  line-height: var(--lh-label);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 18ch;
+}
+
+.hub-name::before {
+  content: "·";
+  margin-right: var(--sp-2);
+  color: var(--text-tertiary, var(--text-secondary));
+}
+
+.row[data-identity-state="mismatch"] {
+  border-left: 3px solid var(--danger-strong);
+}
+
+.row-sync {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  color: var(--text-tertiary, var(--text-secondary));
+  font-size: var(--fs-label);
+  line-height: var(--lh-label);
+}
+
+.row-body .row-sync svg {
+  flex: none;
+}
+
+/* C6 — identity conflict dialog */
+.identity-conflict {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  border: 1px solid var(--danger-border);
+  background: var(--danger-soft);
+  border-radius: var(--r-md);
+  padding: var(--sp-3) var(--sp-4);
+  margin-bottom: var(--sp-4);
+}
+
+.identity-conflict-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+
+.identity-conflict-label {
+  flex: none;
+  width: 5.5em;
+  color: var(--text-secondary);
+  font-size: var(--fs-label);
+}
+
+.identity-conflict-value {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.identity-conflict-value strong {
+  font-weight: var(--fw-medium);
+  word-break: break-all;
+}
+
+.identity-conflict-new {
+  color: var(--danger-text);
+}
+
+.identity-conflict-arrow {
+  color: var(--text-tertiary, var(--text-secondary));
+  padding-left: 5.5em;
+  transform: rotate(180deg);
+  display: inline-flex;
+}
+
+.identity-conflict-note {
+  margin-top: 0;
+}
+
+/* C5 — login success real-profile block */
+.login-success-avatar-wrap {
+  margin: 0 auto var(--sp-3);
+}
+
+.login-connected-to {
+  color: var(--text-secondary);
+}
+
+.login-wxid {
+  margin-top: var(--sp-2);
+  opacity: 0.8;
+}
+
+/* C7 — technical section headers inside the drawer */
+.kv-section-title {
+  font-size: var(--fs-label);
+  font-weight: var(--fw-semibold);
+  color: var(--text-secondary);
+  margin: 0 0 var(--sp-2);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
 .row-body {
   flex: 1;
   min-width: 0;

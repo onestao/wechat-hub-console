@@ -1,0 +1,6 @@
+{
+  "name": "wechat-console-static",
+  "private": true,
+  "type": "module",
+  "description": "Static ES modules for the WeChat Hub Console UI. type:module lets node --test import these browser modules directly."
+}

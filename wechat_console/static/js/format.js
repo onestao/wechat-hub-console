@@ -72,6 +72,21 @@ export function fmtBytes(value) {
   return `${index === 0 ? size : size.toFixed(size < 10 ? 1 : 0)} ${units[index]}`;
 }
 
+/** "3 分钟前" style relative time for 最近同步 on account cards. */
+export function fmtRelative(value) {
+  const date = parseDate(value);
+  if (!date) return "";
+  const diff = Date.now() - date.getTime();
+  if (!Number.isFinite(diff) || diff < 60 * 1000) return diff >= 0 ? "刚刚" : "";
+  const minute = 60 * 1000;
+  const hour = 60 * minute;
+  const day = 24 * hour;
+  if (diff < hour) return `${Math.floor(diff / minute)} 分钟前`;
+  if (diff < day) return `${Math.floor(diff / hour)} 小时前`;
+  if (diff < 2 * day) return "昨天";
+  return fmtWhen(value);
+}
+
 /** First display glyph for an avatar; CJK-friendly. */
 export function initial(name, fallback = "微") {
   const text = String(name || "").trim();

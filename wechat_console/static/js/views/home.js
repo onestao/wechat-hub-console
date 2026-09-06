@@ -10,7 +10,7 @@
 import { state } from "../state.js";
 import { navigate } from "../router.js";
 import { accountViewModel } from "../account-view-model.js";
-import { renderAccountRow } from "../components/account-row.js";
+import { renderAccountRow, wireAccountAvatars } from "../components/account-row.js";
 import { escapeHtml, fmtWhen, initial } from "../format.js";
 import { icon } from "../icons.js";
 import { showMenu } from "../components/menu.js";
@@ -273,6 +273,8 @@ export function renderHomeView(container, reloadData) {
   // Wire navigation buttons
   const manageBtn = container.querySelector("#homeManageAccountsBtn");
   if (manageBtn) manageBtn.onclick = () => navigate("accounts");
+
+  wireAccountAvatars(container);
 
   const jumpMsgBtn = container.querySelector("#homeJumpMessagesBtn");
   if (jumpMsgBtn) jumpMsgBtn.onclick = () => navigate("messages");

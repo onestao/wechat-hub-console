@@ -462,6 +462,157 @@ class ConsoleIntegrationTest(unittest.TestCase):
             return response.status, json.loads(response.read())
 
 
+class ConsoleIdentityProfileTest(unittest.TestCase):
+    """Agent C — identity v2 account/profile surfaces (C2/C3/C6)."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.mock_server = mock_core.create_server(
+            "127.0.0.1", 0, mock_core.MockCoreState(identity_scenario=True)
+        )
+        cls.core_url = f"http://127.0.0.1:{cls.mock_server.server_port}"
+        cls.mock_thread = threading.Thread(target=cls.mock_server.serve_forever, daemon=True)
+        cls.mock_thread.start()
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls.mock_server.shutdown()
+        cls.mock_server.server_close()
+        cls.mock_thread.join(timeout=2)
+
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory()
+        root = Path(self.temp.name)
+        self.service = ConsoleService(
+            core_url=self.core_url,
+            db_path=root / "console.sqlite",
+            archive_dir=root / "saved-attachments",
+        )
+
+    def tearDown(self) -> None:
+        self.service.stop()
+        self.temp.cleanup()
+
+    @staticmethod
+    def request(url: str, method: str = "GET", payload: dict | None = None) -> tuple[int, dict]:
+        data = None
+        headers = {"Accept": "application/json"}
+        if payload is not None:
+            data = json.dumps(payload).encode("utf-8")
+            headers["Content-Type"] = "application/json"
+        request = urllib.request.Request(url, method=method, data=data, headers=headers)
+        try:
+            with urllib.request.urlopen(request, timeout=3) as response:
+                body = response.read()
+                if response.headers.get_content_type() == "image/png":
+                    return response.status, body
+                return response.status, json.loads(body)
+        except urllib.error.HTTPError as exc:
+            return exc.code, json.loads(exc.read())
+
+    def test_account_detail_enriches_identity_profile(self) -> None:
+        detail = self.service.core.account_detail("account-alpha")
+        self.assertEqual(detail["identity_binding_state"], "bound")
+        self.assertEqual(detail["wechat_identity_uuid"], mock_core.IDENTITY_ALPHA_UUID)
+        self.assertEqual(detail["wechat_profile"]["nickname"], "科研助手小张")
+        self.assertTrue(detail["wechat_profile"]["avatar_url"].startswith("http://"))
+        self.assertEqual(detail["instance_uuid"], mock_core.INSTANCE_ALPHA_UUID)
+        with self.assertRaises(CoreApiError) as caught:
+            self.service.core.account_detail("account-ghost")
+        self.assertEqual(caught.exception.status, 404)
+
+    def test_display_name_rename_closed_loop_keeps_canonical_keys(self) -> None:
+        server = create_server("127.0.0.1", 0, self.service)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        base = f"http://127.0.0.1:{server.server_port}"
+        try:
+            before = self.service.core.account_detail("account-alpha")
+            status, _ = self.request(
+                base + "/api/runtime/accounts/account-alpha/update",
+                method="POST",
+                payload={"display_name": "Alpha 新备注"},
+            )
+            self.assertEqual(status, 200)
+            after = self.service.core.account_detail("account-alpha")
+            self.assertEqual(after["display_name"], "Alpha 新备注")
+            # C3 invariant: rename must not touch instance_uuid / resource_key
+            self.assertEqual(after["instance_uuid"], before["instance_uuid"])
+            self.assertEqual(after["resource_key"], before["resource_key"])
+            self.assertEqual(after["wechat_identity_uuid"], before["wechat_identity_uuid"])
+
+            status, body = self.request(
+                base + "/api/runtime/accounts/account-alpha/update",
+                method="POST",
+                payload={},
+            )
+            self.assertEqual(status, 400)
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+    def test_confirm_switch_resolves_mismatch(self) -> None:
+        server = create_server("127.0.0.1", 0, self.service)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        base = f"http://127.0.0.1:{server.server_port}"
+        try:
+            gamma = self.service.core.account_detail("account-gamma")
+            self.assertEqual(gamma["identity_binding_state"], "mismatch")
+            self.assertEqual(gamma["observed_wechat_user_id"], mock_core.IDENTITY_GAMMA_OBSERVED_WXID)
+
+            status, result = self.request(
+                base + "/api/runtime/accounts/account-gamma/confirm-switch",
+                method="POST",
+                payload={"observed_wechat_user_id": mock_core.IDENTITY_GAMMA_OBSERVED_WXID},
+            )
+            self.assertEqual(status, 200)
+            self.assertEqual(result["identity_binding_state"], "bound")
+
+            resolved = self.service.core.account_detail("account-gamma")
+            self.assertEqual(resolved["identity_binding_state"], "bound")
+            self.assertEqual(resolved["observed_wechat_user_id"], "")
+            # Confirming a switch on a bound account is rejected
+            status, _ = self.request(
+                base + "/api/runtime/accounts/account-alpha/confirm-switch",
+                method="POST",
+                payload={},
+            )
+            self.assertEqual(status, 409)
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+    def test_avatar_proxy_serves_core_resolved_bytes_only(self) -> None:
+        server = create_server("127.0.0.1", 0, self.service)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        base = f"http://127.0.0.1:{server.server_port}"
+        try:
+            status, body = self.request(base + f"/api/avatar/{mock_core.IDENTITY_ALPHA_UUID}")
+            self.assertEqual(status, 200)
+            self.assertTrue(body.startswith(b"\x89PNG"))
+
+            # No avatar for an identity without a profile → structured 404
+            status, _ = self.request(base + "/api/avatar/00000000-0000-4000-8000-000000000000")
+            self.assertEqual(status, 404)
+            # Malformed identity ids are rejected without Core lookups
+            status, _ = self.request(base + "/api/avatar/bad_id!")
+            self.assertEqual(status, 404)
+            # A client-supplied URL parameter is ignored: resolution is Core-only
+            status, body = self.request(
+                base + f"/api/avatar/{mock_core.IDENTITY_ALPHA_UUID}?url=https://evil.example/x.png"
+            )
+            self.assertEqual(status, 200)
+            self.assertTrue(body.startswith(b"\x89PNG"))
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+
 class CoreFailureTest(unittest.TestCase):
     def test_unavailable_core_is_structured(self) -> None:
         client = CoreClient("http://127.0.0.1:1", timeout=0.05)
