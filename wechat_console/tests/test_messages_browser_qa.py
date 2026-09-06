@@ -10,8 +10,8 @@ import time
 from pathlib import Path
 from playwright.sync_api import sync_playwright, expect
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(PROJECT_ROOT / "work" / "console"))
+WORKTREE_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(WORKTREE_ROOT))
 
 from wechat_console.tests import mock_core
 from wechat_console.app import ConsoleService, create_server

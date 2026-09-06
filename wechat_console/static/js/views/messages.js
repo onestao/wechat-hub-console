@@ -19,8 +19,13 @@ let saveDialogEl = null;
 let activeSendWatcher = null;
 let mobilePane = "list"; // "list" | "detail"
 
-// Scoped message state & pagination
+// Scoped message state & async owner context
+let messageOwnerGeneration = 0;
 let activeChatKey = null;
+let scopedRequestSeq = 0;
+let paginationRequestSeq = 0;
+let sendWatcherSeq = 0;
+
 let chatMessages = [];
 let messagesCursor = "";
 let messagesHasMore = false;
@@ -118,6 +123,65 @@ function getActiveAccount() {
   return accounts.find((a) => a.account_id === state.activeAccountId) || accounts[0] || null;
 }
 
+export function buildOwnerKey(accountId, chatId, identityUuid = "", instanceUuid = "") {
+  if (!accountId || !chatId) return "";
+  return `${accountId}::${chatId}::${identityUuid || ""}::${instanceUuid || ""}`;
+}
+
+export function captureMessageOwnerContext() {
+  const activeAccount = getActiveAccount();
+  const accountId = state.activeAccountId || "";
+  const chatId = state.selectedChatId || "";
+  const identityUuid = activeAccount?.wechat_identity_uuid || "";
+  const instanceUuid = activeAccount?.instance_uuid || "";
+  return {
+    generation: messageOwnerGeneration,
+    account_id: accountId,
+    chat_id: chatId,
+    identity_uuid: identityUuid,
+    instance_uuid: instanceUuid,
+    owner_key: buildOwnerKey(accountId, chatId, identityUuid, instanceUuid),
+  };
+}
+
+export function isCurrentMessageOwner(context) {
+  if (!context) return false;
+  if (context.generation !== messageOwnerGeneration) return false;
+  const current = captureMessageOwnerContext();
+  return Boolean(context.owner_key) && context.owner_key === current.owner_key;
+}
+
+export function cancelActiveSendWatcher() {
+  sendWatcherSeq++;
+  if (activeSendWatcher) {
+    clearTimeout(activeSendWatcher);
+    activeSendWatcher = null;
+  }
+}
+
+export function invalidateMessageAsyncContext() {
+  messageOwnerGeneration++;
+  activeChatKey = null;
+  cancelActiveSendWatcher();
+  if (state.sendResult) {
+    setState({ sendResult: null });
+  }
+  isFetchingScoped = false;
+  isLoadingOlder = false;
+  chatMessages = [];
+  messagesCursor = "";
+  messagesHasMore = false;
+}
+
+export function activateMessageOwner(accountId, chatId, identityUuid = "", instanceUuid = "") {
+  invalidateMessageAsyncContext();
+  const nextKey = buildOwnerKey(accountId, chatId, identityUuid, instanceUuid);
+  activeChatKey = nextKey;
+  if (accountId && chatId) {
+    fetchScopedMessages(accountId, chatId, { isNewChat: true });
+  }
+}
+
 async function fetchScopedMessages(
   accountId,
   chatId,
@@ -131,51 +195,135 @@ async function fetchScopedMessages(
     return;
   }
 
-  isFetchingScoped = true;
-  const activeAccount = getActiveAccount();
+  const ownerContext = captureMessageOwnerContext();
+  if (ownerContext.account_id !== accountId || ownerContext.chat_id !== chatId) {
+    return;
+  }
 
-  try {
-    const params = {
-      account_id: accountId,
-      chat_id: chatId,
-      limit: 100,
-    };
-    if (activeAccount?.instance_uuid) {
-      params.instance_uuid = activeAccount.instance_uuid;
-    }
-    if (activeAccount?.wechat_identity_uuid) {
-      params.wechat_identity_uuid = activeAccount.wechat_identity_uuid;
-    }
-    if (before) {
-      params.before = before;
-    }
+  if (isPrepend) {
+    // GATE R3: Pagination request
+    const pageSeq = ++paginationRequestSeq;
+    const dataEpoch = scopedRequestSeq;
+    isLoadingOlder = true;
 
-    const res = await api.messages(params);
-    const fetched = res.messages || [];
-    messagesCursor = res.next_cursor || "";
-    messagesHasMore = Boolean(res.has_more);
+    try {
+      const params = {
+        account_id: accountId,
+        chat_id: chatId,
+        limit: 100,
+      };
+      if (ownerContext.instance_uuid) {
+        params.instance_uuid = ownerContext.instance_uuid;
+      }
+      if (ownerContext.identity_uuid) {
+        params.wechat_identity_uuid = ownerContext.identity_uuid;
+      }
+      if (before) {
+        params.before = before;
+      }
 
-    const existingIds = new Set(chatMessages.map((m) => m.message_id));
-    if (isPrepend) {
+      const res = await api.messages(params);
+
+      // Gate R3 checks:
+      // 1. Generation & owner still match
+      // 2. Pagination sequence is still current
+      // 3. No intervening full replace happened (dataEpoch === scopedRequestSeq)
+      if (
+        !isCurrentMessageOwner(ownerContext) ||
+        pageSeq !== paginationRequestSeq ||
+        dataEpoch !== scopedRequestSeq
+      ) {
+        return; // STALE_IGNORED
+      }
+
+      const fetched = res.messages || [];
+      messagesCursor = res.next_cursor || "";
+      messagesHasMore = Boolean(res.has_more);
+
+      const existingIds = new Set(chatMessages.map((m) => m.message_id));
       const uniqueOlder = fetched.filter((m) => !existingIds.has(m.message_id));
       chatMessages = sortMessagesAsc([...uniqueOlder, ...chatMessages]);
-    } else {
-      chatMessages = sortMessagesAsc(fetched);
-    }
 
-    if (lastContainer) {
-      renderMessagesView(lastContainer, lastReloadData, {
-        isNewChat,
-        isPrepend,
-        oldScrollTop,
-        oldScrollHeight,
-      });
+      if (lastContainer) {
+        renderMessagesView(lastContainer, lastReloadData, {
+          isNewChat: false,
+          isPrepend: true,
+          oldScrollTop,
+          oldScrollHeight,
+        });
+      }
+    } catch (err) {
+      if (
+        isCurrentMessageOwner(ownerContext) &&
+        pageSeq === paginationRequestSeq &&
+        dataEpoch === scopedRequestSeq
+      ) {
+        console.error("Older messages fetch failed:", err);
+      }
+    } finally {
+      if (
+        isCurrentMessageOwner(ownerContext) &&
+        pageSeq === paginationRequestSeq &&
+        dataEpoch === scopedRequestSeq
+      ) {
+        isLoadingOlder = false;
+      }
     }
-  } catch (err) {
-    console.error("Scoped message fetch failed:", err);
-  } finally {
-    isFetchingScoped = false;
-    isLoadingOlder = false;
+  } else {
+    // GATE R2: Scoped replace request
+    const reqSeq = ++scopedRequestSeq;
+    isFetchingScoped = true;
+
+    try {
+      const params = {
+        account_id: accountId,
+        chat_id: chatId,
+        limit: 100,
+      };
+      if (ownerContext.instance_uuid) {
+        params.instance_uuid = ownerContext.instance_uuid;
+      }
+      if (ownerContext.identity_uuid) {
+        params.wechat_identity_uuid = ownerContext.identity_uuid;
+      }
+      if (before) {
+        params.before = before;
+      }
+
+      const res = await api.messages(params);
+
+      // Gate R2 checks:
+      // 1. Generation & owner still match
+      // 2. Request sequence is still the latest scoped replace sequence
+      if (
+        !isCurrentMessageOwner(ownerContext) ||
+        reqSeq !== scopedRequestSeq
+      ) {
+        return; // STALE_IGNORED
+      }
+
+      const fetched = res.messages || [];
+      messagesCursor = res.next_cursor || "";
+      messagesHasMore = Boolean(res.has_more);
+      chatMessages = sortMessagesAsc(fetched);
+
+      if (lastContainer) {
+        renderMessagesView(lastContainer, lastReloadData, {
+          isNewChat,
+          isPrepend: false,
+          oldScrollTop,
+          oldScrollHeight,
+        });
+      }
+    } catch (err) {
+      if (isCurrentMessageOwner(ownerContext) && reqSeq === scopedRequestSeq) {
+        console.error("Scoped message fetch failed:", err);
+      }
+    } finally {
+      if (isCurrentMessageOwner(ownerContext) && reqSeq === scopedRequestSeq) {
+        isFetchingScoped = false;
+      }
+    }
   }
 }
 
@@ -238,6 +386,7 @@ function renderChatListOnly(container, reloadData) {
       const newChatId = item.dataset.chatId;
       mobilePane = "detail";
       if (state.selectedChatId !== newChatId) {
+        invalidateMessageAsyncContext();
         state.selectedChatId = newChatId;
         renderMessagesView(container, reloadData);
       } else {
@@ -317,14 +466,20 @@ export function renderMessagesView(container, reloadData, options = {}) {
 
     const selectedChat = allChats.find((c) => c.chat_id === state.selectedChatId) || filteredChats[0] || null;
 
-  // Check if activeChatKey changed -> trigger scoped loading
-  const currentChatKey = `${state.activeAccountId || ""}:${state.selectedChatId || ""}`;
-  if (currentChatKey && currentChatKey !== activeChatKey) {
-    activeChatKey = currentChatKey;
-    chatMessages = [];
-    messagesCursor = "";
-    messagesHasMore = false;
-    fetchScopedMessages(state.activeAccountId, state.selectedChatId, { isNewChat: true });
+  // Check if owner key changed -> trigger scoped loading
+  const currentOwnerKey = buildOwnerKey(
+    state.activeAccountId,
+    state.selectedChatId,
+    activeAccount?.wechat_identity_uuid || "",
+    activeAccount?.instance_uuid || ""
+  );
+  if (currentOwnerKey && currentOwnerKey !== activeChatKey) {
+    activateMessageOwner(
+      state.activeAccountId,
+      state.selectedChatId,
+      activeAccount?.wechat_identity_uuid || "",
+      activeAccount?.instance_uuid || ""
+    );
   }
 
   // Account Switcher options — C8: nickname — display_name, never bare account_id
@@ -459,7 +614,7 @@ export function renderMessagesView(container, reloadData, options = {}) {
 
   // Send Status Banner
   let sendStatusBannerHtml = "";
-  if (state.sendResult) {
+  if (state.sendResult && isCurrentMessageOwner(state.sendResult)) {
     const sr = state.sendResult;
     if (sr.status === "sending" || sr.status === "accepted" || sr.status === "queued") {
       sendStatusBannerHtml = `
@@ -693,11 +848,9 @@ export function renderMessagesView(container, reloadData, options = {}) {
   const switcher = container.querySelector("#messagesAccountSwitcher");
   if (switcher) {
     switcher.onchange = async () => {
+      invalidateMessageAsyncContext();
       state.activeAccountId = switcher.value;
       state.selectedChatId = "";
-      activeChatKey = null;
-      chatMessages = [];
-      messagesCursor = "";
       mobilePane = "list";
       await reloadData();
     };
@@ -736,6 +889,7 @@ export function renderMessagesView(container, reloadData, options = {}) {
       const newChatId = item.dataset.chatId;
       mobilePane = "detail";
       if (state.selectedChatId !== newChatId) {
+        invalidateMessageAsyncContext();
         state.selectedChatId = newChatId;
         renderMessagesView(container, reloadData);
       } else {
@@ -753,7 +907,6 @@ export function renderMessagesView(container, reloadData, options = {}) {
       const curScrollTop = currentThreadEl ? currentThreadEl.scrollTop : 0;
       const curScrollHeight = currentThreadEl ? currentThreadEl.scrollHeight : 0;
 
-      isLoadingOlder = true;
       loadOlderBtn.disabled = true;
       loadOlderBtn.textContent = "正在加载更早消息…";
 
@@ -763,7 +916,6 @@ export function renderMessagesView(container, reloadData, options = {}) {
         oldScrollTop: curScrollTop,
         oldScrollHeight: curScrollHeight,
       });
-      isLoadingOlder = false;
     };
   }
 
@@ -777,14 +929,16 @@ export function renderMessagesView(container, reloadData, options = {}) {
     const text = textarea.value.trim();
     if (!text) return;
 
+    const sendContext = captureMessageOwnerContext();
+    if (!sendContext.account_id || !sendContext.chat_id) return;
+
     const clientRequestId = `console-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const currentActiveAccount = getActiveAccount();
     const payload = {
-      account_id: state.activeAccountId,
-      chat_id: selectedChat.chat_id,
+      account_id: sendContext.account_id,
+      chat_id: sendContext.chat_id,
       text,
       client_request_id: clientRequestId,
-      expected_wechat_identity_uuid: currentActiveAccount?.wechat_identity_uuid || "",
+      expected_wechat_identity_uuid: sendContext.identity_uuid || "",
     };
 
     textarea.value = "";
@@ -792,6 +946,8 @@ export function renderMessagesView(container, reloadData, options = {}) {
 
     setState({
       sendResult: {
+        owner_key: sendContext.owner_key,
+        generation: sendContext.generation,
         status: "sending",
         client_request_id: clientRequestId,
         kind: "text",
@@ -802,11 +958,19 @@ export function renderMessagesView(container, reloadData, options = {}) {
 
     try {
       const receipt = await api.sendText(payload, clientRequestId);
+      if (!isCurrentMessageOwner(sendContext)) {
+        return;
+      }
       const sendId = receipt.send_id || clientRequestId;
-      watchSendStatus(sendId, { kind: "text", text }, container, reloadData);
+      watchSendStatus(sendId, { kind: "text", text }, container, reloadData, sendContext);
     } catch (err) {
+      if (!isCurrentMessageOwner(sendContext)) {
+        return;
+      }
       setState({
         sendResult: {
+          owner_key: sendContext.owner_key,
+          generation: sendContext.generation,
           status: "failed",
           error: err.message,
           kind: "text",
@@ -839,9 +1003,14 @@ export function renderMessagesView(container, reloadData, options = {}) {
       const file = imageInput.files?.[0];
       if (!file || !selectedChat) return;
 
+      const sendContext = captureMessageOwnerContext();
+      if (!sendContext.account_id || !sendContext.chat_id) return;
+
       const clientRequestId = `console-img-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       setState({
         sendResult: {
+          owner_key: sendContext.owner_key,
+          generation: sendContext.generation,
           status: "sending",
           client_request_id: clientRequestId,
           kind: "image",
@@ -852,24 +1021,45 @@ export function renderMessagesView(container, reloadData, options = {}) {
       renderMessagesView(container, reloadData);
 
       try {
-        const currentActiveAccount = getActiveAccount();
         const base64 = await readFileAsBase64(file, { imageOnly: true });
+
+        // GATE R6 Check: Did owner change during file reading?
+        if (!isCurrentMessageOwner(sendContext)) {
+          // FAIL-CLOSED: DO NOT CALL api.sendImage
+          toast({
+            title: "会话已切换，已取消本次附件发送，请在当前会话重新选择文件。",
+            tone: "warn",
+          });
+          return;
+        }
+
         const payload = {
-          account_id: state.activeAccountId,
-          chat_id: selectedChat.chat_id,
+          account_id: sendContext.account_id,
+          chat_id: sendContext.chat_id,
           content_base64: base64,
           filename: file.name,
           mime_type: file.type || "image/jpeg",
           client_request_id: clientRequestId,
-          expected_wechat_identity_uuid: currentActiveAccount?.wechat_identity_uuid || "",
+          expected_wechat_identity_uuid: sendContext.identity_uuid || "",
         };
+
         const receipt = await api.sendImage(payload, clientRequestId);
+
+        if (!isCurrentMessageOwner(sendContext)) {
+          return;
+        }
+
         const sendId = receipt.send_id || clientRequestId;
-        watchSendStatus(sendId, { kind: "image", filename: file.name, text: `[图片: ${file.name}]` }, container, reloadData);
+        watchSendStatus(sendId, { kind: "image", filename: file.name, text: `[图片: ${file.name}]` }, container, reloadData, sendContext);
       } catch (err) {
+        if (!isCurrentMessageOwner(sendContext)) {
+          return;
+        }
         toast({ title: err.message, tone: "bad" });
         setState({
           sendResult: {
+            owner_key: sendContext.owner_key,
+            generation: sendContext.generation,
             status: "failed",
             error: err.message,
             kind: "image",
@@ -896,9 +1086,14 @@ export function renderMessagesView(container, reloadData, options = {}) {
       const file = fileInput.files?.[0];
       if (!file || !selectedChat) return;
 
+      const sendContext = captureMessageOwnerContext();
+      if (!sendContext.account_id || !sendContext.chat_id) return;
+
       const clientRequestId = `console-file-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       setState({
         sendResult: {
+          owner_key: sendContext.owner_key,
+          generation: sendContext.generation,
           status: "sending",
           client_request_id: clientRequestId,
           kind: "file",
@@ -909,24 +1104,45 @@ export function renderMessagesView(container, reloadData, options = {}) {
       renderMessagesView(container, reloadData);
 
       try {
-        const currentActiveAccount = getActiveAccount();
         const base64 = await readFileAsBase64(file, { imageOnly: false });
+
+        // GATE R6 Check: Did owner change during file reading?
+        if (!isCurrentMessageOwner(sendContext)) {
+          // FAIL-CLOSED: DO NOT CALL api.sendFile
+          toast({
+            title: "会话已切换，已取消本次附件发送，请在当前会话重新选择文件。",
+            tone: "warn",
+          });
+          return;
+        }
+
         const payload = {
-          account_id: state.activeAccountId,
-          chat_id: selectedChat.chat_id,
+          account_id: sendContext.account_id,
+          chat_id: sendContext.chat_id,
           content_base64: base64,
           filename: file.name,
           mime_type: file.type || "application/octet-stream",
           client_request_id: clientRequestId,
-          expected_wechat_identity_uuid: currentActiveAccount?.wechat_identity_uuid || "",
+          expected_wechat_identity_uuid: sendContext.identity_uuid || "",
         };
+
         const receipt = await api.sendFile(payload, clientRequestId);
+
+        if (!isCurrentMessageOwner(sendContext)) {
+          return;
+        }
+
         const sendId = receipt.send_id || clientRequestId;
-        watchSendStatus(sendId, { kind: "file", filename: file.name, text: `[文件: ${file.name}]` }, container, reloadData);
+        watchSendStatus(sendId, { kind: "file", filename: file.name, text: `[文件: ${file.name}]` }, container, reloadData, sendContext);
       } catch (err) {
+        if (!isCurrentMessageOwner(sendContext)) {
+          return;
+        }
         toast({ title: err.message, tone: "bad" });
         setState({
           sendResult: {
+            owner_key: sendContext.owner_key,
+            generation: sendContext.generation,
             status: "failed",
             error: err.message,
             kind: "file",
@@ -1049,11 +1265,12 @@ export function renderMessagesView(container, reloadData, options = {}) {
   });
 }
 
-function watchSendStatus(sendId, payloadInfo, container, reloadData) {
-  if (activeSendWatcher) {
-    clearTimeout(activeSendWatcher);
-    activeSendWatcher = null;
-  }
+function watchSendStatus(sendId, payloadInfo, container, reloadData, originContext = null) {
+  cancelActiveSendWatcher();
+
+  const watcherToken = sendWatcherSeq;
+  const context = originContext || captureMessageOwnerContext();
+  if (!context.account_id || !context.chat_id) return;
 
   const kind = typeof payloadInfo === "object" ? payloadInfo.kind || "text" : "text";
   const text = typeof payloadInfo === "object" ? payloadInfo.text : payloadInfo;
@@ -1063,13 +1280,23 @@ function watchSendStatus(sendId, payloadInfo, container, reloadData) {
   const maxPolls = 90;
 
   const check = async () => {
+    if (watcherToken !== sendWatcherSeq || !isCurrentMessageOwner(context)) {
+      return;
+    }
     pollCount++;
     try {
       const send = await api.sendStatus(sendId);
+
+      if (watcherToken !== sendWatcherSeq || !isCurrentMessageOwner(context)) {
+        return;
+      }
+
       const status = send.status;
 
       setState({
         sendResult: {
+          owner_key: context.owner_key,
+          generation: context.generation,
           send_id: sendId,
           status,
           delivery_certainty: send.delivery_certainty,
@@ -1086,25 +1313,34 @@ function watchSendStatus(sendId, payloadInfo, container, reloadData) {
 
       if (status === "sent" || status === "uncertain" || status === "failed") {
         if (status === "sent") {
-          // Fetch latest messages for this chat and scroll to bottom
-          if (state.activeAccountId && state.selectedChatId) {
-            await fetchScopedMessages(state.activeAccountId, state.selectedChatId, { isNewChat: false });
+          // Fetch latest messages for this origin chat and scroll to bottom
+          await fetchScopedMessages(context.account_id, context.chat_id, { isNewChat: false });
+          if (watcherToken === sendWatcherSeq && isCurrentMessageOwner(context)) {
+            renderMessagesView(container, reloadData, { justSent: true });
           }
-          renderMessagesView(container, reloadData, { justSent: true });
         } else {
-          await reloadData();
+          if (watcherToken === sendWatcherSeq && isCurrentMessageOwner(context)) {
+            await reloadData();
+          }
         }
         return;
       }
 
       if (pollCount < maxPolls) {
         const delay = pollCount === 1 ? 500 : 2000;
-        activeSendWatcher = setTimeout(check, delay);
+        if (watcherToken === sendWatcherSeq && isCurrentMessageOwner(context)) {
+          activeSendWatcher = setTimeout(check, delay);
+        }
       }
     } catch (err) {
+      if (watcherToken !== sendWatcherSeq || !isCurrentMessageOwner(context)) {
+        return;
+      }
       console.warn("Send status check failed:", err);
       if (pollCount < maxPolls) {
-        activeSendWatcher = setTimeout(check, 2000);
+        if (watcherToken === sendWatcherSeq && isCurrentMessageOwner(context)) {
+          activeSendWatcher = setTimeout(check, 2000);
+        }
       }
     }
   };
