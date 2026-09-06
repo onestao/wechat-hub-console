@@ -460,11 +460,12 @@ export function renderMessagesView(container, reloadData, options = {}) {
   const allChats = state.chats || [];
   const filteredChats = getFilteredChats();
 
-  if (!state.selectedChatId && filteredChats.length > 0) {
-    state.selectedChatId = filteredChats[0].chat_id;
+  // Selection reconciliation: if selectedChatId is empty or no longer exists in allChats, reconcile
+  if (!state.selectedChatId || !allChats.some((c) => c.chat_id === state.selectedChatId)) {
+    state.selectedChatId = filteredChats.length > 0 ? filteredChats[0].chat_id : "";
   }
 
-    const selectedChat = allChats.find((c) => c.chat_id === state.selectedChatId) || filteredChats[0] || null;
+  const selectedChat = allChats.find((c) => c.chat_id === state.selectedChatId) || null;
 
   // Check if owner key changed -> trigger scoped loading
   const currentOwnerKey = buildOwnerKey(

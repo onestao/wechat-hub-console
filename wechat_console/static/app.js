@@ -29,53 +29,95 @@ const PAGE_TITLES = {
 
 let currentRouteInfo = { route: "home", primary: "home", sub: "" };
 
+let loadAllDataSeq = 0;
+
 async function loadAllData() {
+  const requestSeq = ++loadAllDataSeq;
+  const requestedAccountId = state.activeAccountId || "";
+
   try {
     const status = await api.status();
+    if (requestSeq !== loadAllDataSeq) {
+      return;
+    }
+
     const core = status.core || {};
     const runtimeMgmt = status.runtime_management || {};
     const coreAccounts = status.accounts || [];
     const runtimeAccounts = runtimeMgmt.accounts || [];
 
-    setState({
-      status,
-      coreOk: Boolean(core.ok),
-      runtimeManagement: runtimeMgmt,
-      accounts: coreAccounts,
-      runtimeAccounts,
-    });
-
-    // If activeAccountId is unset or no longer exists, pick the first available
+    // All available account IDs in the returned status
     const allIds = Array.from(
       new Set([
         ...runtimeAccounts.map((a) => a.account_id),
         ...coreAccounts.map((a) => a.account_id),
       ])
     );
-    if (!state.activeAccountId || !allIds.includes(state.activeAccountId)) {
-      setState({ activeAccountId: allIds[0] || "" });
+
+    // Derive effective owner:
+    // Prioritize caller intent if valid in status; fallback to active or first available
+    let effectiveAccountId = requestedAccountId;
+    if (!effectiveAccountId || !allIds.includes(effectiveAccountId)) {
+      if (state.activeAccountId && allIds.includes(state.activeAccountId)) {
+        effectiveAccountId = state.activeAccountId;
+      } else {
+        effectiveAccountId = allIds[0] || "";
+      }
     }
 
-    // Scoped secondary data fetch:
-    // Do not fetch global messages. Home only needs top 5 recent snippets;
-    // Messages view loads its own scoped messages by (account, chat_id).
+    // Scoped secondary data fetch using effective owner
     const isHomeRoute = currentRouteInfo.primary === "home";
     const [chatsRes, messagesRes, savedRes] = await Promise.allSettled([
-      state.activeAccountId ? api.chats(state.activeAccountId) : Promise.resolve({ chats: [] }),
+      effectiveAccountId ? api.chats(effectiveAccountId) : Promise.resolve({ chats: [] }),
       isHomeRoute
-        ? api.messages({ account_id: state.activeAccountId, limit: 5 })
+        ? api.messages({ account_id: effectiveAccountId, limit: 5 })
         : Promise.resolve({ messages: [] }),
       api.saved({ limit: 100 }),
     ]);
 
+    // Generation stale guard after secondary requests
+    if (requestSeq !== loadAllDataSeq) {
+      return;
+    }
+
+    // Ownership compatibility check: drop if user actively switched to another account
+    if (state.activeAccountId && state.activeAccountId !== effectiveAccountId) {
+      return;
+    }
+
+    const nextChats = chatsRes.status === "fulfilled" ? chatsRes.value?.chats || [] : [];
+    const nextMessages = messagesRes.status === "fulfilled" ? messagesRes.value?.messages || [] : [];
+    const nextSaved = savedRes.status === "fulfilled" ? (savedRes.value.items || savedRes.value.saved_messages || []) : [];
+
+    // Selection reconciliation for selectedChatId
+    let nextSelectedChatId = state.selectedChatId;
+    if (nextSelectedChatId && !nextChats.some((c) => c.chat_id === nextSelectedChatId)) {
+      nextSelectedChatId = "";
+    }
+
+    // Atomic commit
     setState({
-      chats: chatsRes.status === "fulfilled" ? chatsRes.value.chats || [] : [],
-      messages: messagesRes.status === "fulfilled" ? messagesRes.value.messages || [] : [],
-      saved: savedRes.status === "fulfilled" ? (savedRes.value.items || savedRes.value.saved_messages || []) : [],
+      status,
+      coreOk: Boolean(core.ok),
+      runtimeManagement: runtimeMgmt,
+      accounts: coreAccounts,
+      runtimeAccounts,
+      activeAccountId: effectiveAccountId,
+      selectedChatId: nextSelectedChatId,
+      chats: nextChats,
+      messages: nextMessages,
+      saved: nextSaved,
     });
   } catch (err) {
+    if (requestSeq !== loadAllDataSeq) {
+      return;
+    }
     console.warn("loadAllData encountered error:", err);
     setState({ coreOk: false });
+  }
+
+  if (requestSeq !== loadAllDataSeq) {
+    return;
   }
 
   updateGlobalIndicators();
@@ -245,3 +287,9 @@ if (document.readyState === "loading") {
 } else {
   initAppShell();
 }
+
+window.__wechatHubState = state;
+window.__wechatHubApp = {
+  loadAllData,
+  getLoadSeq: () => loadAllDataSeq,
+};
