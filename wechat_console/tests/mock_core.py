@@ -43,6 +43,9 @@ class MockCoreState:
                 "account_id": "account-alpha",
                 "display_name": "Alpha WeChat",
                 "state": "online",
+                "instance_uuid": "instance-alpha-uuid",
+                "wechat_identity_uuid": "identity-alpha-uuid",
+                "identity_binding_state": "bound",
                 "runtime": {"display": ":1", "pid": 4101, "healthy": True},
                 "sync": {"healthy": True, "last_event_at": "2026-08-31T07:00:03Z"},
             },
@@ -50,6 +53,9 @@ class MockCoreState:
                 "account_id": "account-beta",
                 "display_name": "Beta WeChat",
                 "state": "online",
+                "instance_uuid": "instance-beta-uuid",
+                "wechat_identity_uuid": "identity-beta-uuid",
+                "identity_binding_state": "bound",
                 "runtime": {"display": ":1", "pid": 4102, "healthy": True},
                 "sync": {"healthy": True, "last_event_at": "2026-08-31T07:00:02Z"},
             },
@@ -91,6 +97,85 @@ class MockCoreState:
                 "mime_type": "image/png",
                 "content": SAMPLE_PNG,
             }
+        }
+        self.contacts = {
+            "identity-alpha-uuid": [
+                {
+                    "account_id": "account-alpha",
+                    "wechat_identity_uuid": "identity-alpha-uuid",
+                    "member_id": "alice",
+                    "display_name": "Alice Wonderland",
+                    "remark": "Alice",
+                    "nickname": "Alice In Wonderland",
+                    "alias": "alice_w",
+                    "avatar_ref": "/api/avatar/alice",
+                    "avatar_url": "/v1/identities/identity-alpha-uuid/contacts/alice/avatar",
+                    "head_img_md5": "md5-alice",
+                    "updated_at": "2026-08-31T07:00:01Z",
+                },
+                {
+                    "account_id": "account-alpha",
+                    "wechat_identity_uuid": "identity-alpha-uuid",
+                    "member_id": "charlie",
+                    "display_name": "Charlie Chaplin",
+                    "remark": "",
+                    "nickname": "Charlie Chaplin",
+                    "alias": "charlie",
+                    "avatar_ref": "/api/avatar/charlie",
+                    "avatar_url": "/v1/identities/identity-alpha-uuid/contacts/charlie/avatar",
+                    "head_img_md5": "",
+                    "updated_at": "2026-08-31T07:00:02Z",
+                },
+            ],
+            "identity-beta-uuid": [
+                {
+                    "account_id": "account-beta",
+                    "wechat_identity_uuid": "identity-beta-uuid",
+                    "member_id": "bob",
+                    "display_name": "Bob Builder",
+                    "remark": "Bob",
+                    "nickname": "Bob The Builder",
+                    "alias": "bob_b",
+                    "avatar_ref": "/api/avatar/bob",
+                    "avatar_url": "/v1/identities/identity-beta-uuid/contacts/bob/avatar",
+                    "head_img_md5": "md5-bob",
+                    "updated_at": "2026-08-31T07:00:02Z",
+                }
+            ],
+        }
+        self.members = {
+            ("identity-alpha-uuid", "alpha-group-1@chatroom"): [
+                {
+                    "account_id": "account-alpha",
+                    "wechat_identity_uuid": "identity-alpha-uuid",
+                    "chat_id": "alpha-group-1@chatroom",
+                    "member_id": "alice",
+                    "group_nickname": "Alice (Leader)",
+                    "display_name": "Alice (Leader)",
+                    "remark": "Alice",
+                    "nickname": "Alice In Wonderland",
+                    "alias": "alice_w",
+                    "avatar_ref": "/api/avatar/alice",
+                    "avatar_url": "/v1/identities/identity-alpha-uuid/contacts/alice/avatar",
+                    "is_self": False,
+                    "updated_at": "2026-08-31T07:00:01Z",
+                },
+                {
+                    "account_id": "account-alpha",
+                    "wechat_identity_uuid": "identity-alpha-uuid",
+                    "chat_id": "alpha-group-1@chatroom",
+                    "member_id": "charlie",
+                    "group_nickname": "",
+                    "display_name": "Charlie Chaplin",
+                    "remark": "",
+                    "nickname": "Charlie Chaplin",
+                    "alias": "charlie",
+                    "avatar_ref": "/api/avatar/charlie",
+                    "avatar_url": "/v1/identities/identity-alpha-uuid/contacts/charlie/avatar",
+                    "is_self": False,
+                    "updated_at": "2026-08-31T07:00:02Z",
+                },
+            ]
         }
         self.events = [
             {
@@ -220,6 +305,9 @@ class MockCoreState:
                 "account_id": account_id,
                 "display_name": str(payload.get("display_name") or account_id),
                 "state": "login_required" if running else "stopped",
+                "instance_uuid": f"instance-{account_id}-uuid",
+                "wechat_identity_uuid": "",
+                "identity_binding_state": "unbound",
                 "runtime": {
                     "display": str(payload.get("display") or ":1"),
                     "pid": pid,
@@ -532,6 +620,66 @@ class MockCoreHandler(BaseHTTPRequestHandler):
                 return
             if path == "/v1/events/poll":
                 self._json(200, self.state.poll_events(query))
+                return
+            if path.startswith("/v1/identities/") and path.endswith("/contacts"):
+                ident_uuid = unquote(path[len("/v1/identities/") : -len("/contacts")].strip("/"))
+                rows = list(self.state.contacts.get(ident_uuid, []))
+                search = query.get("query", [""])[0].strip().lower()
+                if search:
+                    rows = [
+                        row for row in rows
+                        if search in row.get("display_name", "").lower()
+                        or search in row.get("remark", "").lower()
+                        or search in row.get("nickname", "").lower()
+                        or search in row.get("alias", "").lower()
+                        or search in row.get("member_id", "").lower()
+                    ]
+                try:
+                    limit = max(1, min(int(query.get("limit", ["100"])[0]), 500))
+                except ValueError as exc:
+                    raise ApiError(400, "invalid_limit", "limit must be an integer") from exc
+                self._json(200, {"wechat_identity_uuid": ident_uuid, "contacts": rows[:limit], "next_cursor": "", "has_more": False})
+                return
+            if path.startswith("/v1/identities/") and "/chats/" in path and path.endswith("/members"):
+                prefix_part, rest = path.split("/chats/", 1)
+                ident_uuid = unquote(prefix_part[len("/v1/identities/") :].strip("/"))
+                chat_id = unquote(rest[: -len("/members")].strip("/"))
+                rows = list(self.state.members.get((ident_uuid, chat_id), []))
+                search = query.get("query", [""])[0].strip().lower()
+                if search:
+                    rows = [
+                        row for row in rows
+                        if search in row.get("display_name", "").lower()
+                        or search in row.get("group_nickname", "").lower()
+                        or search in row.get("member_id", "").lower()
+                    ]
+                try:
+                    limit = max(1, min(int(query.get("limit", ["200"])[0]), 500))
+                except ValueError as exc:
+                    raise ApiError(400, "invalid_limit", "limit must be an integer") from exc
+                self._json(200, {"wechat_identity_uuid": ident_uuid, "chat_id": chat_id, "members": rows[:limit], "next_cursor": "", "has_more": False})
+                return
+            if path.startswith("/v1/identities/") and path.endswith("/profile"):
+                ident_uuid = unquote(path[len("/v1/identities/") : -len("/profile")].strip("/"))
+                self._json(200, {
+                    "wechat_identity_uuid": ident_uuid,
+                    "wechat_user_id": "wxid_self_mock",
+                    "nickname": "Mock User",
+                    "avatar_ref": "/api/avatar/mock_user",
+                    "avatar_url": f"/v1/identities/{ident_uuid}/avatar",
+                    "profile_json": {},
+                    "created_at": "2026-08-31T07:00:00Z",
+                    "updated_at": "2026-08-31T07:00:00Z",
+                })
+                return
+            if path.startswith("/v1/avatar/") or path.startswith("/api/avatar/") or (path.startswith("/v1/identities/") and path.endswith("/avatar")):
+                content = SAMPLE_PNG
+                self.send_response(200)
+                self.send_header("Content-Type", "image/png")
+                self.send_header("Content-Length", str(len(content)))
+                self.send_header("Cache-Control", "public, max-age=86400")
+                self.end_headers()
+                self.wfile.write(content)
                 return
             media_prefix = "/v1/media/"
             if path.startswith(media_prefix):

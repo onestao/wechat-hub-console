@@ -1,8 +1,8 @@
-/* Messages View.
+/* Messages View (v2).
  *
- * Dual-pane chat browser, capability-aware message composer,
- * send status tracking (submitted, sent, uncertain, failed),
- * and saved messages integration.
+ * Scoped message loading, cursor pagination, visual scroll anchoring,
+ * strict auto-scroll rules, capability-aware composer, Send Gate identity
+ * protection, and saved messages integration.
  */
 
 import { state, setState } from "../state.js";
@@ -17,6 +17,235 @@ import { openDialog, closeDialog } from "../components/dialog.js";
 let saveDialogEl = null;
 let activeSendWatcher = null;
 let mobilePane = "list"; // "list" | "detail"
+
+// Scoped message state & pagination
+let activeChatKey = null;
+let chatMessages = [];
+let messagesCursor = "";
+let messagesHasMore = false;
+let isLoadingOlder = false;
+let isFetchingScoped = false;
+let lastContainer = null;
+let lastReloadData = null;
+
+export function resolveChatName(chat) {
+  if (!chat) return "未选择会话";
+  const name = (chat.display_name || chat.alias || chat.name || "").trim();
+  if (name) return name;
+  return chat.chat_id || "未命名会话";
+}
+
+export function isGroupChat(chat) {
+  if (!chat) return false;
+  return (
+    chat.type === "group" ||
+    Boolean(chat.is_group) ||
+    Boolean(chat.chat_id && chat.chat_id.endsWith("@chatroom"))
+  );
+}
+
+export function isOutgoingMessage(m) {
+  if (!m) return false;
+  return (
+    m.direction === "outgoing" ||
+    Boolean(m.author?.is_self) ||
+    Boolean(m.is_self) ||
+    Boolean(m.is_sender) ||
+    Boolean(m.is_outgoing) ||
+    m.from_user === "me"
+  );
+}
+
+export function resolveAuthorName(m, chat) {
+  if (isOutgoingMessage(m)) {
+    return "我";
+  }
+  const author = m.author || {};
+  const name = (
+    author.display_name ||
+    author.alias ||
+    author.member_id ||
+    m.sender_name ||
+    m.sender ||
+    ""
+  ).trim();
+  if (name) {
+    return name;
+  }
+  const isGroup = isGroupChat(chat);
+  if (isGroup) {
+    // 群聊中禁止 fallback 为“对方”
+    return (author.member_id || m.sender_id || m.sender || m.from_user || "群成员").trim();
+  }
+  return (
+    author.member_id ||
+    m.sender_id ||
+    m.sender ||
+    m.from_user ||
+    (chat ? resolveChatName(chat) : "") ||
+    ""
+  ).trim();
+}
+
+export function sortMessagesAsc(list) {
+  return list.slice().sort((a, b) => {
+    const ta = a.created_at || a.timestamp || a.occurred_at || "";
+    const tb = b.created_at || b.timestamp || b.occurred_at || "";
+    if (ta < tb) return -1;
+    if (ta > tb) return 1;
+    const ida = a.message_id || "";
+    const idb = b.message_id || "";
+    return String(ida).localeCompare(String(idb));
+  });
+}
+
+
+function renderAvatar(authorName, avatarUrl, isSelf) {
+  if (avatarUrl) {
+    return `<img class="avatar avatar-sm bubble-avatar-img" src="${escapeAttr(
+      avatarUrl
+    )}" alt="${escapeAttr(authorName)}" style="width: 28px; height: 28px; border-radius: var(--r-sm); object-fit: cover;" />`;
+  }
+  const glyph = initial(authorName, isSelf ? "我" : "友");
+  return `<span class="avatar avatar-sm bubble-avatar-glyph" style="width: 28px; height: 28px; font-size: 11px;">${escapeHtml(
+    glyph
+  )}</span>`;
+}
+
+function getActiveAccount() {
+  const accounts = state.runtimeAccounts.length > 0 ? state.runtimeAccounts : state.accounts;
+  return accounts.find((a) => a.account_id === state.activeAccountId) || accounts[0] || null;
+}
+
+async function fetchScopedMessages(
+  accountId,
+  chatId,
+  { isNewChat = false, isPrepend = false, before = "", oldScrollTop = 0, oldScrollHeight = 0 } = {}
+) {
+  if (!accountId || !chatId) {
+    chatMessages = [];
+    messagesCursor = "";
+    messagesHasMore = false;
+    if (lastContainer) renderMessagesView(lastContainer, lastReloadData);
+    return;
+  }
+
+  isFetchingScoped = true;
+  const activeAccount = getActiveAccount();
+
+  try {
+    const params = {
+      account_id: accountId,
+      chat_id: chatId,
+      limit: 100,
+    };
+    if (activeAccount?.instance_uuid) {
+      params.instance_uuid = activeAccount.instance_uuid;
+    }
+    if (activeAccount?.wechat_identity_uuid) {
+      params.wechat_identity_uuid = activeAccount.wechat_identity_uuid;
+    }
+    if (before) {
+      params.before = before;
+    }
+
+    const res = await api.messages(params);
+    const fetched = res.messages || [];
+    messagesCursor = res.next_cursor || "";
+    messagesHasMore = Boolean(res.has_more);
+
+    const existingIds = new Set(chatMessages.map((m) => m.message_id));
+    if (isPrepend) {
+      const uniqueOlder = fetched.filter((m) => !existingIds.has(m.message_id));
+      chatMessages = sortMessagesAsc([...uniqueOlder, ...chatMessages]);
+    } else {
+      chatMessages = sortMessagesAsc(fetched);
+    }
+
+    if (lastContainer) {
+      renderMessagesView(lastContainer, lastReloadData, {
+        isNewChat,
+        isPrepend,
+        oldScrollTop,
+        oldScrollHeight,
+      });
+    }
+  } catch (err) {
+    console.error("Scoped message fetch failed:", err);
+  } finally {
+    isFetchingScoped = false;
+    isLoadingOlder = false;
+  }
+}
+
+function renderChatItemsHtml(filteredChats, selectedChatId) {
+  if (filteredChats.length === 0) {
+    return `<div style="padding: 24px 16px; text-align: center; color: var(--text-secondary);">暂无会话</div>`;
+  }
+  return filteredChats
+    .map((c) => {
+      const isSelected = c.chat_id === selectedChatId;
+      const displayName = resolveChatName(c);
+      const isGroup = isGroupChat(c);
+      const initialGlyph = initial(displayName, isGroup ? "群" : "会");
+      const snippet = c.last_message_snippet || c.last_message || "";
+      const timeStr = c.last_message_time || c.updated_at ? fmtWhen(c.last_message_time || c.updated_at) : "";
+
+      return `
+        <button class="chat-item" data-chat-id="${escapeAttr(
+          c.chat_id
+        )}" aria-selected="${isSelected ? "true" : "false"}">
+          <span class="avatar avatar-sm">${escapeHtml(initialGlyph)}</span>
+          <span class="chat-item-body">
+            <span class="chat-item-header-line" style="display: flex; align-items: center; justify-content: space-between; gap: 6px;">
+              <span class="chat-item-name" style="flex: 1; min-width: 0;">${escapeHtml(displayName)}</span>
+              ${isGroup ? `<span class="badge" style="font-size: 10px; padding: 1px 5px; flex-shrink: 0;">群聊${c.member_count ? `(${c.member_count})` : ""}</span>` : ""}
+              ${timeStr ? `<span class="chat-item-time caption" style="font-size: 11px; color: var(--text-tertiary); flex-shrink: 0;">${escapeHtml(timeStr)}</span>` : ""}
+            </span>
+            ${
+              snippet
+                ? `<span class="chat-item-meta">${escapeHtml(snippet)}</span>`
+                : ""
+            }
+          </span>
+        </button>
+      `;
+    })
+    .join("");
+}
+
+function getFilteredChats() {
+  const chatQuery = (state.messageQuery || "").trim().toLowerCase();
+  const allChats = state.chats || [];
+  return chatQuery
+    ? allChats.filter((c) => {
+        const name = resolveChatName(c).toLowerCase();
+        const cid = (c.chat_id || "").toLowerCase();
+        return name.includes(chatQuery) || cid.includes(chatQuery);
+      })
+    : allChats;
+}
+
+function renderChatListOnly(container, reloadData) {
+  const chatListRoot = container.querySelector("#messagesChatListRoot");
+  if (!chatListRoot) return;
+  const filteredChats = getFilteredChats();
+  chatListRoot.innerHTML = renderChatItemsHtml(filteredChats, state.selectedChatId);
+
+  chatListRoot.querySelectorAll(".chat-item[data-chat-id]").forEach((item) => {
+    item.onclick = () => {
+      const newChatId = item.dataset.chatId;
+      mobilePane = "detail";
+      if (state.selectedChatId !== newChatId) {
+        state.selectedChatId = newChatId;
+        renderMessagesView(container, reloadData);
+      } else {
+        renderMessagesView(container, reloadData);
+      }
+    };
+  });
+}
+
 
 function readFileAsBase64(file, { imageOnly = false } = {}) {
   return new Promise((resolve, reject) => {
@@ -51,8 +280,20 @@ function readFileAsBase64(file, { imageOnly = false } = {}) {
  * Render Messages View.
  * @param {HTMLElement} container
  * @param {() => Promise<void>} reloadData
+ * @param {object} [options]
  */
-export function renderMessagesView(container, reloadData) {
+export function renderMessagesView(container, reloadData, options = {}) {
+  lastContainer = container;
+  lastReloadData = reloadData;
+
+  const {
+    isNewChat = false,
+    isPrepend = false,
+    oldScrollTop = 0,
+    oldScrollHeight = 0,
+    justSent = false,
+  } = options;
+
   const accounts = state.runtimeAccounts.length > 0 ? state.runtimeAccounts : state.accounts;
   if (!state.activeAccountId && accounts.length > 0) {
     state.activeAccountId = accounts[0].account_id;
@@ -66,13 +307,8 @@ export function renderMessagesView(container, reloadData) {
   });
 
   // Filter chats by query
-  const chatQuery = (state.messageQuery || "").trim().toLowerCase();
   const allChats = state.chats || [];
-  const filteredChats = chatQuery
-    ? allChats.filter((c) =>
-        (c.name || c.chat_id || "").toLowerCase().includes(chatQuery)
-      )
-    : allChats;
+  const filteredChats = getFilteredChats();
 
   if (!state.selectedChatId && filteredChats.length > 0) {
     state.selectedChatId = filteredChats[0].chat_id;
@@ -80,85 +316,86 @@ export function renderMessagesView(container, reloadData) {
 
   const selectedChat = allChats.find((c) => c.chat_id === state.selectedChatId) || filteredChats[0] || null;
 
+  // Check if activeChatKey changed -> trigger scoped loading
+  const currentChatKey = `${state.activeAccountId || ""}:${state.selectedChatId || ""}`;
+  if (currentChatKey && currentChatKey !== activeChatKey) {
+    activeChatKey = currentChatKey;
+    chatMessages = [];
+    messagesCursor = "";
+    messagesHasMore = false;
+    fetchScopedMessages(state.activeAccountId, state.selectedChatId, { isNewChat: true });
+  }
+
   // Account Switcher options
   const accountSwitcherOptions = accounts
     .map(
       (a) =>
         `<option value="${escapeAttr(a.account_id)}" ${
-          a.account_id === state.activeAccountId ? "selected" : ""
+          a.account_id === state.activeAccountId ? "selected " : ""
         }>${escapeHtml(a.display_name || a.account_id)}</option>`
     )
     .join("");
 
   // Render Chat list items
-  let chatListHtml = "";
-  if (filteredChats.length === 0) {
-    chatListHtml = `<div style="padding: 24px 16px; text-align: center; color: var(--text-secondary);">暂无会话</div>`;
-  } else {
-    chatListHtml = filteredChats
-      .map((c) => {
-        const isSelected = c.chat_id === state.selectedChatId;
-        const name = c.name || c.chat_id || "未命名会话";
-        const initialGlyph = initial(name, "会");
-        const snippet = c.last_message_snippet || c.last_message || "";
+  const chatListHtml = renderChatItemsHtml(filteredChats, state.selectedChatId);
 
-        return `
-          <button class="chat-item" data-chat-id="${escapeAttr(
-            c.chat_id
-          )}" aria-selected="${isSelected ? "true" : "false"}">
-            <span class="avatar avatar-sm">${escapeHtml(initialGlyph)}</span>
-            <span class="chat-item-body">
-              <span class="chat-item-name">${escapeHtml(name)}</span>
-              ${
-                snippet
-                  ? `<span class="chat-item-meta">${escapeHtml(snippet)}</span>`
-                  : ""
-              }
-            </span>
-          </button>
-        `;
-      })
-      .join("");
-  }
-
-  // Filter messages for the selected chat
-  let messagesForChat = (state.messages || []).filter(
-    (m) =>
-      (!state.activeAccountId || m.account_id === state.activeAccountId) &&
-      (!state.selectedChatId || m.chat_id === state.selectedChatId)
-  );
-
+  // Filter messages by selected type
+  let messagesToDisplay = chatMessages;
   if (state.selectedMessageType) {
-    messagesForChat = messagesForChat.filter(
-      (m) => m.type === state.selectedMessageType
-    );
+    messagesToDisplay = chatMessages.filter((m) => m.type === state.selectedMessageType);
   }
 
   // Render Message Thread
+  const selectedChatName = resolveChatName(selectedChat);
+  const selectedIsGroup = isGroupChat(selectedChat);
+
+  let loadOlderHtml = "";
+  if (messagesHasMore) {
+    loadOlderHtml = `
+      <div class="load-older-wrap" style="text-align: center; padding: 4px 0 8px;">
+        <button class="btn btn-secondary btn-sm" id="messagesLoadOlderBtn" ${isLoadingOlder ? "disabled" : ""}>
+          ${isLoadingOlder ? "正在加载更早消息…" : "加载更早消息"}
+        </button>
+      </div>
+    `;
+  }
+
   let threadHtml = "";
   if (!selectedChat) {
     threadHtml = `
       <div class="empty" style="padding: 48px var(--gutter);">
         <div class="empty-icon">${icon("message")}</div>
         <div class="empty-title">选择一个会话</div>
-        <p class="empty-text">在左侧列表选择会话查看同步的消息。</p>
+        <p class="empty-text">在左侧列表选择会话查看同步的消息记录。</p>
       </div>
     `;
-  } else if (messagesForChat.length === 0) {
+  } else if (isFetchingScoped && chatMessages.length === 0) {
+    threadHtml = `
+      <div class="empty" style="padding: 48px var(--gutter);">
+        <div class="empty-icon">${icon("message")}</div>
+        <div class="empty-title">正在加载消息…</div>
+        <p class="empty-text">正在获取已同步的消息记录。</p>
+      </div>
+    `;
+  } else if (messagesToDisplay.length === 0) {
     threadHtml = `
       <div class="empty" style="padding: 48px var(--gutter);">
         <div class="empty-icon">${icon("message")}</div>
         <div class="empty-title">暂无消息</div>
-        <p class="empty-text">该会话尚未同步到消息记录。</p>
+        <p class="empty-text">${
+          state.selectedMessageType ? "该分类下暂无消息记录。" : "该会话尚未同步到消息记录。"
+        }</p>
       </div>
     `;
   } else {
-    threadHtml = messagesForChat
+    const bubblesHtml = messagesToDisplay
       .map((m) => {
-        const isOutgoing = Boolean(m.is_sender || m.is_outgoing || m.from_user === "me");
-        const authorName = isOutgoing ? "我" : (m.sender_name || m.sender || selectedChat.name || "对方");
-        const when = fmtWhen(m.timestamp || m.created_at || m.occurred_at);
+        const isOutgoing = isOutgoingMessage(m);
+        const authorName = resolveAuthorName(m, selectedChat);
+        const when = fmtWhen(m.created_at || m.timestamp || m.occurred_at);
         const authorText = `${authorName} · ${when}`;
+        const authorObj = m.author || {};
+        const avatarUrl = authorObj.avatar_url || m.avatar_url || "";
 
         let attachmentHtml = "";
         if (m.media_id || m.type === "image" || m.type === "file" || m.type === "video") {
@@ -182,35 +419,42 @@ export function renderMessagesView(container, reloadData) {
           }
         }
 
-        const isRevoked = Boolean(m.revoked || m.is_revoked);
+        const isRevoked = Boolean(m.removed || m.revoked || m.is_revoked);
         const textHtml = isRevoked
           ? `<em style="color: var(--text-tertiary);">[消息已撤回/移除]</em>`
           : escapeHtml(m.text || "");
 
         return `
-          <div class="bubble-line ${isOutgoing ? "outgoing" : ""}" data-msg-id="${escapeAttr(
+          <div class="bubble-line ${isOutgoing ? "outgoing" : ""} ${isRevoked ? "removed" : ""}" data-msg-id="${escapeAttr(
             m.message_id || ""
           )}">
-            <span class="bubble-author">${escapeHtml(authorText)}</span>
+            <div class="bubble-author-row" style="display: flex; align-items: center; gap: 6px; margin-bottom: 2px; ${isOutgoing ? "justify-content: flex-end;" : ""}">
+              ${!isOutgoing ? renderAvatar(authorName, avatarUrl, false) : ""}
+              <span class="bubble-author">${escapeHtml(authorText)}</span>
+              ${isOutgoing ? renderAvatar(authorName, avatarUrl, true) : ""}
+            </div>
             <div class="bubble">
               ${textHtml ? `<div class="bubble-text">${textHtml}</div>` : ""}
               ${attachmentHtml}
-              <button class="btn btn-icon btn-sm bubble-save-btn" data-save-msg="${escapeAttr(
+              <button class="btn btn-icon btn-sm bubble-save-btn bubble-actions" data-save-msg="${escapeAttr(
                 m.message_id || ""
               )}" aria-label="收藏此消息" title="收藏此消息">
                 ${icon("star", { size: "sm" })}
               </button>
             </div>
             ${
-              isOutgoing
+              isOutgoing && !isRevoked
                 ? `<div class="bubble-foot"><span>已发送</span></div>`
                 : ""
             }
           </div>
         `;
       })
-      .join("");
+      .join("\n");
+
+    threadHtml = `${loadOlderHtml}\n${bubblesHtml}`;
   }
+
 
   // Send Status Banner
   let sendStatusBannerHtml = "";
@@ -314,6 +558,19 @@ export function renderMessagesView(container, reloadData) {
   const sendDisabled = caps.canSendText === false || !selectedChat;
   const sendDisabledReason = caps.sendDisabledReason || (!selectedChat ? "请先选择一个会话" : "");
 
+  // Record previous scroll metrics before DOM update
+  const prevThread = container.querySelector("#messagesThreadRoot");
+  let prevScrollTop = 0;
+  let prevScrollHeight = 0;
+  let prevClientHeight = 0;
+  let wasNearBottom = true;
+  if (prevThread) {
+    prevScrollTop = prevThread.scrollTop;
+    prevScrollHeight = prevThread.scrollHeight;
+    prevClientHeight = prevThread.clientHeight;
+    wasNearBottom = prevScrollHeight - prevScrollTop - prevClientHeight <= 60;
+  }
+
   container.innerHTML = `
     <div class="page-inner wide">
       <div class="page-head">
@@ -350,12 +607,13 @@ export function renderMessagesView(container, reloadData) {
                 ${icon("chevronLeft", { size: "sm" })}
               </button>
               <div class="chat-toolbar-title">
-                <div class="item-title">${escapeHtml(
-                  selectedChat?.name || selectedChat?.chat_id || "未选择会话"
-                )}</div>
+                <div class="item-title" style="display: flex; align-items: center; gap: 8px;">
+                  <span>${escapeHtml(selectedChatName)}</span>
+                  ${selectedIsGroup ? `<span class="badge" style="font-size: 11px; padding: 2px 6px;">群聊${selectedChat?.member_count ? ` (${selectedChat.member_count}人)` : ""}</span>` : ""}
+                </div>
                 <div class="caption">${escapeHtml(
                   selectedChat
-                    ? `${selectedChat.is_group ? "群聊" : "单聊"} · ${messagesForChat.length} 条已同步消息`
+                    ? `${selectedIsGroup ? "群聊" : "单聊"} · ${messagesToDisplay.length} 条已同步消息`
                     : "选择会话查看"
                 )}</div>
               </div>
@@ -414,10 +672,20 @@ export function renderMessagesView(container, reloadData) {
     </div>
   `;
 
-  // Auto scroll thread to bottom
+  // Precise auto-scroll & visual scroll anchoring
   const threadEl = container.querySelector("#messagesThreadRoot");
   if (threadEl) {
-    threadEl.scrollTop = threadEl.scrollHeight;
+    if (isPrepend) {
+      const newScrollHeight = threadEl.scrollHeight;
+      threadEl.scrollTop = oldScrollTop + (newScrollHeight - oldScrollHeight);
+    } else if (isNewChat || justSent) {
+      threadEl.scrollTop = threadEl.scrollHeight;
+    } else if (wasNearBottom) {
+      threadEl.scrollTop = threadEl.scrollHeight;
+    } else {
+      // User is reading history -> preserve scroll position
+      threadEl.scrollTop = prevScrollTop;
+    }
   }
 
   // Wire Account Switcher
@@ -426,6 +694,9 @@ export function renderMessagesView(container, reloadData) {
     switcher.onchange = async () => {
       state.activeAccountId = switcher.value;
       state.selectedChatId = "";
+      activeChatKey = null;
+      chatMessages = [];
+      messagesCursor = "";
       mobilePane = "list";
       await reloadData();
     };
@@ -436,7 +707,7 @@ export function renderMessagesView(container, reloadData) {
   if (searchInput) {
     searchInput.oninput = () => {
       state.messageQuery = searchInput.value;
-      renderMessagesView(container, reloadData);
+      renderChatListOnly(container, reloadData);
     };
   }
 
@@ -461,11 +732,40 @@ export function renderMessagesView(container, reloadData) {
   // Wire Chat Item clicks
   container.querySelectorAll(".chat-item[data-chat-id]").forEach((item) => {
     item.onclick = () => {
-      state.selectedChatId = item.dataset.chatId;
+      const newChatId = item.dataset.chatId;
       mobilePane = "detail";
-      renderMessagesView(container, reloadData);
+      if (state.selectedChatId !== newChatId) {
+        state.selectedChatId = newChatId;
+        renderMessagesView(container, reloadData);
+      } else {
+        renderMessagesView(container, reloadData);
+      }
     };
   });
+
+  // Wire Load Older Messages
+  const loadOlderBtn = container.querySelector("#messagesLoadOlderBtn");
+  if (loadOlderBtn) {
+    loadOlderBtn.onclick = async () => {
+      if (isLoadingOlder || !messagesCursor) return;
+      const currentThreadEl = container.querySelector("#messagesThreadRoot");
+      const curScrollTop = currentThreadEl ? currentThreadEl.scrollTop : 0;
+      const curScrollHeight = currentThreadEl ? currentThreadEl.scrollHeight : 0;
+
+      isLoadingOlder = true;
+      loadOlderBtn.disabled = true;
+      loadOlderBtn.textContent = "正在加载更早消息…";
+
+      await fetchScopedMessages(state.activeAccountId, state.selectedChatId, {
+        isPrepend: true,
+        before: messagesCursor,
+        oldScrollTop: curScrollTop,
+        oldScrollHeight: curScrollHeight,
+      });
+      isLoadingOlder = false;
+    };
+  }
+
 
   // Wire Send Button & Enter key
   const textarea = container.querySelector("#composerTextarea");
@@ -477,11 +777,13 @@ export function renderMessagesView(container, reloadData) {
     if (!text) return;
 
     const clientRequestId = `console-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const currentActiveAccount = getActiveAccount();
     const payload = {
       account_id: state.activeAccountId,
       chat_id: selectedChat.chat_id,
       text,
       client_request_id: clientRequestId,
+      expected_wechat_identity_uuid: currentActiveAccount?.wechat_identity_uuid || "",
     };
 
     textarea.value = "";
@@ -549,6 +851,7 @@ export function renderMessagesView(container, reloadData) {
       renderMessagesView(container, reloadData);
 
       try {
+        const currentActiveAccount = getActiveAccount();
         const base64 = await readFileAsBase64(file, { imageOnly: true });
         const payload = {
           account_id: state.activeAccountId,
@@ -557,6 +860,7 @@ export function renderMessagesView(container, reloadData) {
           filename: file.name,
           mime_type: file.type || "image/jpeg",
           client_request_id: clientRequestId,
+          expected_wechat_identity_uuid: currentActiveAccount?.wechat_identity_uuid || "",
         };
         const receipt = await api.sendImage(payload, clientRequestId);
         const sendId = receipt.send_id || clientRequestId;
@@ -604,6 +908,7 @@ export function renderMessagesView(container, reloadData) {
       renderMessagesView(container, reloadData);
 
       try {
+        const currentActiveAccount = getActiveAccount();
         const base64 = await readFileAsBase64(file, { imageOnly: false });
         const payload = {
           account_id: state.activeAccountId,
@@ -612,6 +917,7 @@ export function renderMessagesView(container, reloadData) {
           filename: file.name,
           mime_type: file.type || "application/octet-stream",
           client_request_id: clientRequestId,
+          expected_wechat_identity_uuid: currentActiveAccount?.wechat_identity_uuid || "",
         };
         const receipt = await api.sendFile(payload, clientRequestId);
         const sendId = receipt.send_id || clientRequestId;
@@ -736,7 +1042,7 @@ export function renderMessagesView(container, reloadData) {
     btn.onclick = (e) => {
       e.stopPropagation();
       const msgId = btn.dataset.saveMsg;
-      const msg = messagesForChat.find((m) => m.message_id === msgId);
+      const msg = chatMessages.find((m) => m.message_id === msgId);
       if (msg) openSaveDialog(msg, reloadData);
     };
   });
@@ -778,7 +1084,15 @@ function watchSendStatus(sendId, payloadInfo, container, reloadData) {
       renderMessagesView(container, reloadData);
 
       if (status === "sent" || status === "uncertain" || status === "failed") {
-        await reloadData();
+        if (status === "sent") {
+          // Fetch latest messages for this chat and scroll to bottom
+          if (state.activeAccountId && state.selectedChatId) {
+            await fetchScopedMessages(state.activeAccountId, state.selectedChatId, { isNewChat: false });
+          }
+          renderMessagesView(container, reloadData, { justSent: true });
+        } else {
+          await reloadData();
+        }
         return;
       }
 

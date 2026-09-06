@@ -24,9 +24,11 @@ from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
 
 try:
+    from .agent_client import AgentApiError, AgentClient
     from .core_client import CoreApiError, CoreClient, SUPPORTED_CONTRACT_VERSION
     from .store import ConsoleStore, utc_now
 except ImportError:  # pragma: no cover - supports `python wechat_console/app.py`
+    from agent_client import AgentApiError, AgentClient
     from core_client import CoreApiError, CoreClient, SUPPORTED_CONTRACT_VERSION
     from store import ConsoleStore, utc_now
 
@@ -54,6 +56,7 @@ class ConsoleService:
     ) -> None:
         self.core = CoreClient(core_url, timeout=core_timeout)
         self.store = ConsoleStore(db_path, archive_dir)
+        self.agent = AgentClient(agent_url)
         self.agent_url = agent_url.rstrip("/")
         self.efb_url = efb_url.rstrip("/")
         self.desktop_url = desktop_url.rstrip("/")
@@ -246,6 +249,21 @@ class ConsoleService:
         payload["chats"] = chats
         return payload
 
+    def resolve_identity_uuid(self, *, account_id: str = "", wechat_identity_uuid: str = "") -> str:
+        if wechat_identity_uuid:
+            return wechat_identity_uuid.strip()
+        try:
+            accounts = self.core.accounts()
+        except Exception:
+            return ""
+        if account_id:
+            for acc in accounts:
+                if acc.get("account_id") == account_id:
+                    return str(acc.get("wechat_identity_uuid") or "")
+        elif len(accounts) == 1:
+            return str(accounts[0].get("wechat_identity_uuid") or "")
+        return ""
+
     def save_message(self, payload: dict[str, Any]) -> dict[str, Any]:
         account_id = _required_text(payload, "account_id")
         message_id = _required_text(payload, "message_id")
@@ -336,6 +354,43 @@ def _required_text(payload: dict[str, Any], key: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{key} must be a non-empty string")
     return value.strip()
+
+
+def _agent_write(path: str, payload: dict[str, Any]) -> tuple[dict[str, Any], str, str]:
+    """Dispatch one Agent automation upsert; returns (result, kind, id)."""
+    if path == "/api/agent/monitors":
+        result = service.agent.upsert_monitor(payload)
+        return result, "monitor", str(result.get("monitor_id") or "")
+    if path == "/api/agent/schedules":
+        result = service.agent.upsert_schedule(payload)
+        return result, "schedule", str(result.get("schedule_id") or "")
+    if path == "/api/agent/templates":
+        result = service.agent.upsert_template(payload)
+        return result, "template", str(result.get("template_id") or "")
+    raise KeyError("endpoint not found")
+
+
+def _agent_delete(path: str) -> tuple[str, str]:
+    """Dispatch one Agent automation delete; returns (kind, id)."""
+    if path.startswith("/api/agent/monitors/"):
+        monitor_id = unquote(path[len("/api/agent/monitors/") :])
+        if not monitor_id or "/" in monitor_id:
+            raise KeyError("endpoint not found")
+        service.agent.delete_monitor(monitor_id)
+        return "monitor", monitor_id
+    if path.startswith("/api/agent/schedules/"):
+        schedule_id = unquote(path[len("/api/agent/schedules/") :])
+        if not schedule_id or "/" in schedule_id:
+            raise KeyError("endpoint not found")
+        service.agent.delete_schedule(schedule_id)
+        return "schedule", schedule_id
+    if path.startswith("/api/agent/templates/"):
+        template_id = unquote(path[len("/api/agent/templates/") :])
+        if not template_id or "/" in template_id:
+            raise KeyError("endpoint not found")
+        service.agent.delete_template(template_id)
+        return "template", template_id
+    raise KeyError("endpoint not found")
 
 
 def _probe_optional(name: str, base_url: str) -> dict[str, Any]:
@@ -431,6 +486,13 @@ def create_handler(service: ConsoleService):
                     exc.status,
                 )
                 return
+            if isinstance(exc, AgentApiError):
+                _json_response(
+                    self,
+                    {"error": {"code": exc.code, "message": exc.message, "details": exc.details}},
+                    exc.status,
+                )
+                return
             if isinstance(exc, KeyError):
                 _json_response(self, {"error": {"code": "not_found", "message": str(exc), "details": {}}}, 404)
                 return
@@ -491,16 +553,118 @@ def create_handler(service: ConsoleService):
                         service.chats(_query_text(query, "account_id"), _query_text(query, "query")),
                     )
                     return
-                if path == "/api/messages":
-                    rows = service.store.list_messages(
-                        account_id=_query_text(query, "account_id"),
-                        chat_id=_query_text(query, "chat_id"),
-                        query=_query_text(query, "query"),
-                        message_type=_query_text(query, "type"),
-                        limit=_query_int(query, "limit", 100, 1, 500),
-                        include_removed=_query_text(query, "include_removed").lower() in {"1", "true", "yes"},
+                if path == "/api/contacts":
+                    account_id = _query_text(query, "account_id")
+                    wechat_identity_uuid = _query_text(query, "wechat_identity_uuid")
+                    if not wechat_identity_uuid:
+                        wechat_identity_uuid = service.resolve_identity_uuid(
+                            account_id=account_id, wechat_identity_uuid=wechat_identity_uuid
+                        )
+                    if not wechat_identity_uuid:
+                        if account_id:
+                            raise ValueError(f"No identity bound for account {account_id}")
+                        _json_response(self, {"contacts": [], "next_cursor": "", "has_more": False, "wechat_identity_uuid": ""})
+                        return
+                    search_query = _query_text(query, "query")
+                    cursor = _query_text(query, "cursor")
+                    limit = _query_int(query, "limit", 100, 1, 500)
+                    result = service.core.identity_contacts(
+                        wechat_identity_uuid,
+                        query=search_query,
+                        limit=limit,
+                        cursor=cursor,
                     )
-                    _json_response(self, {"messages": rows, "cursor": service.store.cursor()})
+                    _json_response(self, result)
+                    return
+                chats_prefix = "/api/chats/"
+                if path.startswith(chats_prefix) and path.endswith("/members"):
+                    chat_id = unquote(path[len(chats_prefix) : -len("/members")].strip("/"))
+                    account_id = _query_text(query, "account_id")
+                    wechat_identity_uuid = _query_text(query, "wechat_identity_uuid")
+                    if not wechat_identity_uuid:
+                        wechat_identity_uuid = service.resolve_identity_uuid(
+                            account_id=account_id, wechat_identity_uuid=wechat_identity_uuid
+                        )
+                    if not wechat_identity_uuid:
+                        raise ValueError("account_id or wechat_identity_uuid is required")
+                    search_query = _query_text(query, "query")
+                    cursor = _query_text(query, "cursor")
+                    limit = _query_int(query, "limit", 200, 1, 500)
+                    result = service.core.identity_members(
+                        wechat_identity_uuid,
+                        chat_id,
+                        query=search_query,
+                        limit=limit,
+                        cursor=cursor,
+                    )
+                    _json_response(self, result)
+                    return
+                if path == "/api/identity/profile":
+                    account_id = _query_text(query, "account_id")
+                    wechat_identity_uuid = _query_text(query, "wechat_identity_uuid")
+                    if not wechat_identity_uuid:
+                        wechat_identity_uuid = service.resolve_identity_uuid(
+                            account_id=account_id, wechat_identity_uuid=wechat_identity_uuid
+                        )
+                    if not wechat_identity_uuid:
+                        raise ValueError("account_id or wechat_identity_uuid is required")
+                    result = service.core.identity_profile(wechat_identity_uuid)
+                    _json_response(self, result)
+                    return
+                avatar_prefix = "/api/avatar/"
+                if path.startswith(avatar_prefix) or path.startswith("/v1/avatar/"):
+                    prefix = avatar_prefix if path.startswith(avatar_prefix) else "/v1/avatar/"
+                    avatar_key = unquote(path[len(prefix) :].strip("/"))
+                    if not avatar_key:
+                        raise KeyError("avatar key is required")
+                    body, mime_type = service.core.avatar(path if path.startswith("/v1/avatar/") else avatar_key)
+                    self.send_response(200)
+                    self.send_header("Content-Type", mime_type)
+                    self.send_header("Content-Length", str(len(body)))
+                    self.send_header("Cache-Control", "public, max-age=86400")
+                    self.end_headers()
+                    self.wfile.write(body)
+                    return
+                if path.startswith("/v1/identities/") and path.endswith("/avatar"):
+                    body, mime_type = service.core.avatar(path)
+                    self.send_response(200)
+                    self.send_header("Content-Type", mime_type)
+                    self.send_header("Content-Length", str(len(body)))
+                    self.send_header("Cache-Control", "public, max-age=86400")
+                    self.end_headers()
+                    self.wfile.write(body)
+                    return
+                if path == "/api/messages":
+                    instance_uuid = _query_text(query, "instance_uuid")
+                    wechat_identity_uuid = _query_text(query, "wechat_identity_uuid")
+                    account_id = _query_text(query, "account_id")
+                    chat_id = _query_text(query, "chat_id")
+                    before = _query_text(query, "before") or _query_text(query, "cursor")
+                    limit = _query_int(query, "limit", 100, 1, 500)
+                    msg_type = _query_text(query, "type")
+                    search_query = _query_text(query, "query")
+                    include_removed = _query_text(query, "include_removed").lower() in {"1", "true", "yes"}
+
+                    page = service.store.list_messages(
+                        account_id=account_id,
+                        instance_uuid=instance_uuid,
+                        wechat_identity_uuid=wechat_identity_uuid,
+                        chat_id=chat_id,
+                        query=search_query,
+                        message_type=msg_type,
+                        limit=limit,
+                        before=before,
+                        include_removed=include_removed,
+                    )
+                    _json_response(
+                        self,
+                        {
+                            "messages": list(page),
+                            "cursor": service.store.cursor(),
+                            "next_cursor": getattr(page, "next_cursor", ""),
+                            "has_more": getattr(page, "has_more", False),
+                        },
+                    )
                     return
                 if path == "/api/messages/summary":
                     _json_response(
@@ -595,11 +759,44 @@ def create_handler(service: ConsoleService):
                 if path == "/api/integrations":
                     _json_response(self, service.integration_status())
                     return
+                agent_prefix = "/api/agent/"
+                if path.startswith(agent_prefix):
+                    self._handle_agent_get(path, query)
+                    return
                 self._serve_static(parsed.path)
             except (BrokenPipeError, ConnectionResetError):
                 return
             except Exception as exc:
                 self._handle_error(exc)
+
+        def _handle_agent_get(self, path: str, query: dict[str, list[str]]) -> None:
+            """Proxy the optional Agent automation surface; failures stay structured."""
+            if path == "/api/agent/status":
+                payload = service.agent.status()
+                _json_response(self, {"ok": True, "agent": payload})
+                return
+            if path == "/api/agent/monitors":
+                _json_response(self, {"monitors": service.agent.monitors()})
+                return
+            if path == "/api/agent/schedules":
+                _json_response(self, {"schedules": service.agent.schedules()})
+                return
+            if path == "/api/agent/templates":
+                _json_response(self, {"templates": service.agent.templates()})
+                return
+            if path.startswith("/api/agent/monitors/"):
+                monitor_id = unquote(path[len("/api/agent/monitors/") :])
+                if monitor_id.endswith("/runs") and "/" not in monitor_id[: -len("/runs")]:
+                    _json_response(self, service.agent.monitor_runs(monitor_id[: -len("/runs")]))
+                    return
+                raise KeyError("endpoint not found")
+            if path.startswith("/api/agent/schedules/"):
+                schedule_id = unquote(path[len("/api/agent/schedules/") :])
+                if schedule_id.endswith("/runs") and "/" not in schedule_id[: -len("/runs")]:
+                    _json_response(self, service.agent.schedule_runs(schedule_id[: -len("/runs")]))
+                    return
+                raise KeyError("endpoint not found")
+            raise KeyError("endpoint not found")
 
         def do_POST(self) -> None:  # noqa: N802
             path = urlparse(self.path).path.rstrip("/") or "/"
@@ -634,6 +831,9 @@ def create_handler(service: ConsoleService):
                         return
                 if path == "/api/send/text":
                     request_id = str(payload.get("client_request_id") or uuid.uuid4().hex)
+                    expected_identity = str(
+                        payload.get("expected_wechat_identity_uuid") or payload.get("wechat_identity_uuid") or ""
+                    ).strip()
                     result = service.core.send_text(
                         account_id=_required_text(payload, "account_id"),
                         chat_id=_required_text(payload, "chat_id"),
@@ -642,6 +842,7 @@ def create_handler(service: ConsoleService):
                         mention_member_ids=[str(item) for item in payload.get("mention_member_ids") or []],
                         client_request_id=request_id,
                         idempotency_key=str(self.headers.get("Idempotency-Key") or request_id),
+                        expected_wechat_identity_uuid=expected_identity,
                     )
                     service.store.record_send_receipt(result)
                     service.store.log("info", "send", "Text accepted by Core", result)
@@ -654,10 +855,14 @@ def create_handler(service: ConsoleService):
                     outgoing["chat_id"] = _required_text(payload, "chat_id")
                     request_id = str(outgoing.get("client_request_id") or uuid.uuid4().hex)
                     outgoing["client_request_id"] = request_id
+                    expected_identity = str(
+                        payload.get("expected_wechat_identity_uuid") or payload.get("wechat_identity_uuid") or ""
+                    ).strip()
                     result = service.core.send_media(
                         kind,
                         outgoing,
                         idempotency_key=str(self.headers.get("Idempotency-Key") or request_id),
+                        expected_wechat_identity_uuid=expected_identity,
                     )
                     service.store.record_send_receipt(result)
                     service.store.log("info", "send", f"{kind.title()} accepted by Core", result)
@@ -687,6 +892,17 @@ def create_handler(service: ConsoleService):
                             raise KeyError("saved message not found")
                         _json_response(self, item)
                         return
+                agent_prefix = "/api/agent/"
+                if path.startswith(agent_prefix):
+                    result, kind, resource_id = _agent_write(path, payload)
+                    _json_response(self, result, 200)
+                    service.store.log(
+                        "info",
+                        "automation",
+                        f"Agent {kind} saved via Console",
+                        {"kind": kind, "id": resource_id, "agent_url": service.agent_url},
+                    )
+                    return
                 raise KeyError("endpoint not found")
             except (BrokenPipeError, ConnectionResetError):
                 return
@@ -714,6 +930,17 @@ def create_handler(service: ConsoleService):
                         raise KeyError("saved message not found")
                     service.store.log("info", "saved-messages", "Saved message deleted", {"saved_message_id": saved_id})
                     _json_response(self, {"ok": True, "saved_message_id": saved_id})
+                    return
+                agent_prefix = "/api/agent/"
+                if path.startswith(agent_prefix):
+                    kind, resource_id = _agent_delete(path)
+                    _json_response(self, {"ok": True, "kind": kind, "id": resource_id})
+                    service.store.log(
+                        "info",
+                        "automation",
+                        f"Agent {kind} deleted via Console",
+                        {"kind": kind, "id": resource_id, "agent_url": service.agent_url},
+                    )
                     return
                 raise KeyError("endpoint not found")
             except Exception as exc:

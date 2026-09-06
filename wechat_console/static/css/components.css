@@ -1191,8 +1191,10 @@ dialog.sheet[open] {
 /* ======================================================================= */
 
 .chat-list {
-  flex: 1;
+  flex: 1 1 0%;
   min-height: 0;
+  min-width: 0;
+  overflow-y: auto;
 }
 
 .chat-item {
@@ -1238,6 +1240,7 @@ dialog.sheet[open] {
 }
 
 .chat-toolbar {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   gap: var(--sp-3);
@@ -1252,8 +1255,10 @@ dialog.sheet[open] {
 }
 
 .thread {
-  flex: 1;
+  flex: 1 1 0%;
   min-height: 0;
+  min-width: 0;
+  overflow-y: auto;
   padding: var(--sp-4);
   display: flex;
   flex-direction: column;
@@ -1340,6 +1345,7 @@ dialog.sheet[open] {
 }
 
 .composer {
+  flex: 0 0 auto;
   border-top: 1px solid var(--border);
   padding: var(--sp-3) var(--sp-4) var(--sp-4);
   display: flex;

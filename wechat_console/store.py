@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import os
@@ -43,6 +44,36 @@ def normalize_tags(value: Any) -> list[str]:
             break
     return output
 
+
+
+class MessagePage(list):
+    def __init__(self, items: list[dict[str, Any]], next_cursor: str = "", has_more: bool = False):
+        super().__init__(items)
+        self.next_cursor = next_cursor
+        self.has_more = has_more
+
+
+def encode_message_cursor(created_at: str, message_id: str) -> str:
+    raw = json.dumps([str(created_at), str(message_id)], separators=(",", ":"))
+    return base64.urlsafe_b64encode(raw.encode("utf-8")).decode("ascii").rstrip("=")
+
+
+def decode_message_cursor(cursor: str) -> tuple[str, str] | None:
+    if not cursor or not isinstance(cursor, str):
+        return None
+    cursor = cursor.strip()
+    try:
+        padding = "=" * (-len(cursor) % 4)
+        raw = base64.urlsafe_b64decode((cursor + padding).encode("ascii")).decode("utf-8")
+        parsed = json.loads(raw)
+        if isinstance(parsed, list) and len(parsed) == 2 and isinstance(parsed[0], str) and isinstance(parsed[1], str):
+            return parsed[0], parsed[1]
+    except Exception:
+        pass
+    if "|" in cursor:
+        parts = cursor.split("|", 1)
+        return parts[0], parts[1]
+    return None
 
 class ConsoleStore:
     """Console-owned durable state.
@@ -98,6 +129,8 @@ class ConsoleStore:
                     account_id TEXT NOT NULL,
                     message_id TEXT NOT NULL,
                     chat_id TEXT NOT NULL,
+                    instance_uuid TEXT NOT NULL DEFAULT '',
+                    wechat_identity_uuid TEXT NOT NULL DEFAULT '',
                     type TEXT NOT NULL,
                     created_at TEXT NOT NULL,
                     direction TEXT NOT NULL,
@@ -113,7 +146,11 @@ class ConsoleStore:
                     PRIMARY KEY(account_id, message_id)
                 );
                 CREATE INDEX IF NOT EXISTS idx_message_projection_chat_time
-                    ON message_projection(account_id, chat_id, created_at DESC);
+                    ON message_projection(account_id, chat_id, created_at DESC, message_id DESC);
+                CREATE INDEX IF NOT EXISTS idx_message_projection_identity_chat_time
+                    ON message_projection(wechat_identity_uuid, chat_id, created_at DESC, message_id DESC);
+                CREATE INDEX IF NOT EXISTS idx_message_projection_instance_chat_time
+                    ON message_projection(instance_uuid, chat_id, created_at DESC, message_id DESC);
                 CREATE INDEX IF NOT EXISTS idx_message_projection_type
                     ON message_projection(account_id, chat_id, type);
 
@@ -182,6 +219,19 @@ class ConsoleStore:
                     ON console_logs(created_at DESC);
                 """
             )
+            # Ensure columns exist on existing databases
+            cols = {row["name"] for row in conn.execute("PRAGMA table_info(message_projection)").fetchall()}
+            if "instance_uuid" not in cols:
+                conn.execute("ALTER TABLE message_projection ADD COLUMN instance_uuid TEXT NOT NULL DEFAULT ''")
+            if "wechat_identity_uuid" not in cols:
+                conn.execute("ALTER TABLE message_projection ADD COLUMN wechat_identity_uuid TEXT NOT NULL DEFAULT ''")
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_message_projection_identity_chat_time ON message_projection(wechat_identity_uuid, chat_id, created_at DESC, message_id DESC)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_message_projection_instance_chat_time ON message_projection(instance_uuid, chat_id, created_at DESC, message_id DESC)"
+            )
+
 
     def set_meta(self, key: str, value: str) -> None:
         now = utc_now()
@@ -267,15 +317,20 @@ class ConsoleStore:
                 return
             author = message.get("author") if isinstance(message.get("author"), dict) else {}
             now = utc_now()
+            instance_uuid = str(message.get("instance_uuid") or payload.get("instance_uuid") or "").strip()
+            wechat_identity_uuid = str(message.get("wechat_identity_uuid") or payload.get("wechat_identity_uuid") or "").strip()
             conn.execute(
                 """
                 INSERT INTO message_projection (
-                    account_id, message_id, chat_id, type, created_at, direction,
+                    account_id, message_id, chat_id, instance_uuid, wechat_identity_uuid,
+                    type, created_at, direction,
                     author_json, text, media_id, filename, mime_type, target_message_id,
                     payload_json, removed, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
                 ON CONFLICT(account_id, message_id) DO UPDATE SET
                     chat_id=excluded.chat_id,
+                    instance_uuid=CASE WHEN excluded.instance_uuid<>'' THEN excluded.instance_uuid ELSE message_projection.instance_uuid END,
+                    wechat_identity_uuid=CASE WHEN excluded.wechat_identity_uuid<>'' THEN excluded.wechat_identity_uuid ELSE message_projection.wechat_identity_uuid END,
                     type=excluded.type,
                     created_at=excluded.created_at,
                     direction=excluded.direction,
@@ -293,6 +348,8 @@ class ConsoleStore:
                     scoped_account,
                     message_id,
                     chat_id,
+                    instance_uuid,
+                    wechat_identity_uuid,
                     str(message.get("type") or "unsupported"),
                     str(message.get("created_at") or occurred_at),
                     str(message.get("direction") or "incoming"),
@@ -411,10 +468,13 @@ class ConsoleStore:
             author = json.loads(row["author_json"] or "{}")
         except json.JSONDecodeError:
             author = {}
+        row_keys = row.keys() if hasattr(row, "keys") else []
         output = {
             "account_id": row["account_id"],
             "message_id": row["message_id"],
             "chat_id": row["chat_id"],
+            "instance_uuid": row["instance_uuid"] if "instance_uuid" in row_keys else "",
+            "wechat_identity_uuid": row["wechat_identity_uuid"] if "wechat_identity_uuid" in row_keys else "",
             "type": row["type"],
             "created_at": row["created_at"],
             "direction": row["direction"],
@@ -441,17 +501,27 @@ class ConsoleStore:
         self,
         *,
         account_id: str = "",
+        instance_uuid: str = "",
+        wechat_identity_uuid: str = "",
         chat_id: str = "",
         query: str = "",
         message_type: str = "",
         limit: int = 100,
+        before: str = "",
         include_removed: bool = False,
-    ) -> list[dict[str, Any]]:
+    ) -> MessagePage:
         clauses = ["1=1"]
         params: list[Any] = []
-        if account_id:
+        if wechat_identity_uuid:
+            clauses.append("wechat_identity_uuid=?")
+            params.append(wechat_identity_uuid)
+        elif instance_uuid:
+            clauses.append("instance_uuid=?")
+            params.append(instance_uuid)
+        elif account_id:
             clauses.append("account_id=?")
             params.append(account_id)
+
         if chat_id:
             clauses.append("chat_id=?")
             params.append(chat_id)
@@ -464,13 +534,32 @@ class ConsoleStore:
             params.extend([like, like, like])
         if not include_removed:
             clauses.append("removed=0")
-        params.append(max(1, min(int(limit), 500)))
+
+        if before:
+            decoded = decode_message_cursor(before)
+            if decoded:
+                cur_time, cur_id = decoded
+                clauses.append("(created_at < ? OR (created_at = ? AND message_id < ?))")
+                params.extend([cur_time, cur_time, cur_id])
+
+        page_limit = max(1, min(int(limit), 500))
+        params.append(page_limit + 1)
+
         with self.connect() as conn:
             rows = conn.execute(
-                f"SELECT * FROM message_projection WHERE {' AND '.join(clauses)} ORDER BY created_at DESC LIMIT ?",
+                f"SELECT * FROM message_projection WHERE {' AND '.join(clauses)} ORDER BY created_at DESC, message_id DESC LIMIT ?",
                 params,
             ).fetchall()
-        return [self._message_from_row(row) for row in rows]
+
+        has_more = len(rows) > page_limit
+        selected = rows[:page_limit]
+        next_cursor = ""
+        if selected and has_more:
+            last = selected[-1]
+            next_cursor = encode_message_cursor(str(last["created_at"]), str(last["message_id"]))
+
+        items = [self._message_from_row(row) for row in selected]
+        return MessagePage(items, next_cursor=next_cursor, has_more=has_more)
 
     def message_summary(self, account_id: str = "", chat_id: str = "") -> dict[str, Any]:
         clauses = ["removed=0"]

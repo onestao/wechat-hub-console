@@ -15,11 +15,13 @@ import { renderMessagesView } from "./js/views/messages.js";
 import { renderSavedView } from "./js/views/saved.js";
 import { renderAutomationView } from "./js/views/automation.js";
 import { renderSettingsView } from "./js/views/settings.js";
+import { renderContactsView } from "./js/views/contacts.js";
 
 const PAGE_TITLES = {
   home: "首页",
   accounts: "微信",
   messages: "消息",
+  contacts: "通讯录",
   saved: "收藏",
   automation: "自动化",
   settings: "设置",
@@ -54,10 +56,15 @@ async function loadAllData() {
       setState({ activeAccountId: allIds[0] || "" });
     }
 
-    // Parallel fetch secondary data
+    // Scoped secondary data fetch:
+    // Do not fetch global messages. Home only needs top 5 recent snippets;
+    // Messages view loads its own scoped messages by (account, chat_id).
+    const isHomeRoute = currentRouteInfo.primary === "home";
     const [chatsRes, messagesRes, savedRes] = await Promise.allSettled([
       state.activeAccountId ? api.chats(state.activeAccountId) : Promise.resolve({ chats: [] }),
-      api.messages({ limit: 100 }),
+      isHomeRoute
+        ? api.messages({ account_id: state.activeAccountId, limit: 5 })
+        : Promise.resolve({ messages: [] }),
       api.saved({ limit: 100 }),
     ]);
 
@@ -169,6 +176,9 @@ function renderCurrentPage() {
       break;
     case "messages":
       renderMessagesView(pageEl, loadAllData);
+      break;
+    case "contacts":
+      renderContactsView(pageEl, loadAllData);
       break;
     case "saved":
       renderSavedView(pageEl, loadAllData);

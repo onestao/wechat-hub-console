@@ -275,12 +275,16 @@
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;
+  height: 100%;
 }
 
 .split-main {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;
+  height: 100%;
 }
 
 .split-back {
@@ -509,9 +513,25 @@ body.nav-open .nav-scrim {
     display: inline-flex;
   }
 
-  /* On a phone the thread should scroll with the page, not inside a short box. */
+  .split-side {
+    min-height: 0;
+  }
+
+  .split-side .chat-list {
+    min-height: 45dvh;
+    max-height: calc(100dvh - 220px);
+    overflow-y: auto;
+  }
+
+  .split-main {
+    min-height: 0;
+  }
+
+  /* On a phone the thread scrolls smoothly with clean boundaries. */
   .split-main .thread {
     min-height: 50dvh;
+    max-height: calc(100dvh - 220px);
+    overflow-y: auto;
   }
 }
 

@@ -462,6 +462,260 @@ class ConsoleIntegrationTest(unittest.TestCase):
             return response.status, json.loads(response.read())
 
 
+
+    def test_messages_cursor_pagination_and_ordering(self) -> None:
+        account_id = "account-alpha"
+        chat_id = "alpha-pagination-chat"
+        events = []
+        for i in range(1, 6):
+            # i=4 and i=5 share the same minute to test (created_at, message_id) tie-breaking
+            minute = 3 if i >= 4 else i
+            events.append(
+                {
+                    "event_id": f"evt-page-{i}",
+                    "cursor": str(200 + i),
+                    "account_id": account_id,
+                    "event_type": "message.created",
+                    "occurred_at": f"2026-09-02T10:0{minute}:00Z",
+                    "payload": {
+                        "message": {
+                            "account_id": account_id,
+                            "message_id": f"msg-page-{i}",
+                            "chat_id": chat_id,
+                            "type": "text",
+                            "direction": "incoming",
+                            "created_at": f"2026-09-02T10:0{minute}:00Z",
+                            "text": f"Message {i}",
+                            "author": {"member_id": "alice", "display_name": "Alice"},
+                        }
+                    },
+                }
+            )
+        self.service.store.ingest_events(events, "210")
+
+        # Page 1: limit 2
+        page1 = self.service.store.list_messages(account_id=account_id, chat_id=chat_id, limit=2)
+        self.assertEqual(len(page1), 2)
+        self.assertEqual(page1[0]["message_id"], "msg-page-5")
+        self.assertEqual(page1[1]["message_id"], "msg-page-4")
+        self.assertTrue(page1.has_more)
+        self.assertTrue(bool(page1.next_cursor))
+
+        # Page 2: limit 2 using cursor
+        page2 = self.service.store.list_messages(
+            account_id=account_id, chat_id=chat_id, limit=2, before=page1.next_cursor
+        )
+        self.assertEqual(len(page2), 2)
+        self.assertEqual(page2[0]["message_id"], "msg-page-3")
+        self.assertEqual(page2[1]["message_id"], "msg-page-2")
+        self.assertTrue(page2.has_more)
+        self.assertTrue(bool(page2.next_cursor))
+
+        # Page 3: limit 2 using cursor (last remaining message)
+        page3 = self.service.store.list_messages(
+            account_id=account_id, chat_id=chat_id, limit=2, before=page2.next_cursor
+        )
+        self.assertEqual(len(page3), 1)
+        self.assertEqual(page3[0]["message_id"], "msg-page-1")
+        self.assertFalse(page3.has_more)
+        self.assertEqual(page3.next_cursor, "")
+
+    def test_scoped_message_querying_by_chat_and_identity(self) -> None:
+        events = [
+            {
+                "event_id": "evt-scope-1",
+                "cursor": "301",
+                "account_id": "account-alpha",
+                "event_type": "message.created",
+                "occurred_at": "2026-09-02T11:00:00Z",
+                "payload": {
+                    "instance_uuid": "inst-1",
+                    "wechat_identity_uuid": "ident-1",
+                    "message": {
+                        "account_id": "account-alpha",
+                        "instance_uuid": "inst-1",
+                        "wechat_identity_uuid": "ident-1",
+                        "message_id": "scope-msg-1",
+                        "chat_id": "chat-a",
+                        "type": "text",
+                        "created_at": "2026-09-02T11:00:00Z",
+                        "text": "Chat A message",
+                    },
+                },
+            },
+            {
+                "event_id": "evt-scope-2",
+                "cursor": "302",
+                "account_id": "account-alpha",
+                "event_type": "message.created",
+                "occurred_at": "2026-09-02T11:01:00Z",
+                "payload": {
+                    "instance_uuid": "inst-1",
+                    "wechat_identity_uuid": "ident-1",
+                    "message": {
+                        "account_id": "account-alpha",
+                        "instance_uuid": "inst-1",
+                        "wechat_identity_uuid": "ident-1",
+                        "message_id": "scope-msg-2",
+                        "chat_id": "chat-b",
+                        "type": "text",
+                        "created_at": "2026-09-02T11:01:00Z",
+                        "text": "Chat B message",
+                    },
+                },
+            },
+            {
+                "event_id": "evt-scope-3",
+                "cursor": "303",
+                "account_id": "account-beta",
+                "event_type": "message.created",
+                "occurred_at": "2026-09-02T11:02:00Z",
+                "payload": {
+                    "instance_uuid": "inst-2",
+                    "wechat_identity_uuid": "ident-2",
+                    "message": {
+                        "account_id": "account-beta",
+                        "instance_uuid": "inst-2",
+                        "wechat_identity_uuid": "ident-2",
+                        "message_id": "scope-msg-3",
+                        "chat_id": "chat-a",
+                        "type": "text",
+                        "created_at": "2026-09-02T11:02:00Z",
+                        "text": "Identity 2 message in Chat A",
+                    },
+                },
+            },
+        ]
+        self.service.store.ingest_events(events, "310")
+
+        # Scope by chat_id only
+        chat_a_msgs = self.service.store.list_messages(chat_id="chat-a")
+        self.assertEqual({m["message_id"] for m in chat_a_msgs}, {"scope-msg-1", "scope-msg-3"})
+
+        chat_b_msgs = self.service.store.list_messages(chat_id="chat-b")
+        self.assertEqual({m["message_id"] for m in chat_b_msgs}, {"scope-msg-2"})
+
+        # Scope by identity + chat
+        ident1_chat_a = self.service.store.list_messages(wechat_identity_uuid="ident-1", chat_id="chat-a")
+        self.assertEqual([m["message_id"] for m in ident1_chat_a], ["scope-msg-1"])
+
+        ident2_chat_a = self.service.store.list_messages(wechat_identity_uuid="ident-2", chat_id="chat-a")
+        self.assertEqual([m["message_id"] for m in ident2_chat_a], ["scope-msg-3"])
+
+    def test_send_forwards_expected_wechat_identity_uuid(self) -> None:
+        server = create_server("127.0.0.1", 0, self.service)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        base = f"http://127.0.0.1:{server.server_port}"
+        try:
+            # Text send with expected_wechat_identity_uuid
+            status, text_res = self.request(
+                base + "/api/send/text",
+                method="POST",
+                payload={
+                    "account_id": "account-alpha",
+                    "chat_id": "alpha-private-1",
+                    "text": "identity protected text",
+                    "client_request_id": "id-send-text-1",
+                    "expected_wechat_identity_uuid": "ident-expected-001",
+                },
+            )
+            self.assertEqual(status, 202)
+            last_send = self.mock_server.RequestHandlerClass.state.sends[-1]["request"]
+            self.assertEqual(last_send.get("expected_wechat_identity_uuid"), "ident-expected-001")
+
+            # Image send with expected_wechat_identity_uuid
+            status, img_res = self.request(
+                base + "/api/send/image",
+                method="POST",
+                payload={
+                    "account_id": "account-alpha",
+                    "chat_id": "alpha-private-1",
+                    "content_base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+                    "filename": "pixel.png",
+                    "mime_type": "image/png",
+                    "client_request_id": "id-send-img-1",
+                    "expected_wechat_identity_uuid": "ident-expected-001",
+                },
+            )
+            self.assertEqual(status, 202)
+            last_send = self.mock_server.RequestHandlerClass.state.sends[-1]["request"]
+            self.assertEqual(last_send.get("expected_wechat_identity_uuid"), "ident-expected-001")
+
+            # File send with expected_wechat_identity_uuid
+            status, file_res = self.request(
+                base + "/api/send/file",
+                method="POST",
+                payload={
+                    "account_id": "account-alpha",
+                    "chat_id": "alpha-private-1",
+                    "content_base64": "aGVsbG8=",
+                    "filename": "test.txt",
+                    "mime_type": "text/plain",
+                    "client_request_id": "id-send-file-1",
+                    "expected_wechat_identity_uuid": "ident-expected-001",
+                },
+            )
+            self.assertEqual(status, 202)
+            last_send = self.mock_server.RequestHandlerClass.state.sends[-1]["request"]
+            self.assertEqual(last_send.get("expected_wechat_identity_uuid"), "ident-expected-001")
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+    def test_contacts_and_group_members_flow(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            service = ConsoleService(core_url=self.core_url, db_path=Path(tmp) / "console.sqlite", archive_dir=Path(tmp) / "archive")
+            server = create_server("127.0.0.1", 0, service)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            base = f"http://127.0.0.1:{server.server_port}"
+            try:
+                # 1. Fetch contacts for account-alpha
+                req = urllib.request.Request(f"{base}/api/contacts?account_id=account-alpha")
+                with urllib.request.urlopen(req) as resp:
+                    self.assertEqual(resp.status, 200)
+                    data = json.loads(resp.read().decode("utf-8"))
+                    self.assertIn("contacts", data)
+                    self.assertEqual(len(data["contacts"]), 2)
+                    alice = next(c for c in data["contacts"] if c["member_id"] == "alice")
+                    self.assertEqual(alice["display_name"], "Alice Wonderland")
+
+                # 2. Search contacts
+                req = urllib.request.Request(f"{base}/api/contacts?account_id=account-alpha&query=Charlie")
+                with urllib.request.urlopen(req) as resp:
+                    data = json.loads(resp.read().decode("utf-8"))
+                    self.assertEqual(len(data["contacts"]), 1)
+                    self.assertEqual(data["contacts"][0]["member_id"], "charlie")
+
+                # 3. Group members
+                req = urllib.request.Request(f"{base}/api/chats/alpha-group-1%40chatroom/members?account_id=account-alpha")
+                with urllib.request.urlopen(req) as resp:
+                    data = json.loads(resp.read().decode("utf-8"))
+                    self.assertIn("members", data)
+                    self.assertEqual(len(data["members"]), 2)
+                    self.assertEqual(data["members"][0]["group_nickname"], "Alice (Leader)")
+
+                # 4. Identity Profile
+                req = urllib.request.Request(f"{base}/api/identity/profile?account_id=account-alpha")
+                with urllib.request.urlopen(req) as resp:
+                    data = json.loads(resp.read().decode("utf-8"))
+                    self.assertEqual(data["wechat_identity_uuid"], "identity-alpha-uuid")
+                    self.assertEqual(data["nickname"], "Mock User")
+
+                # 5. Avatar proxy
+                req = urllib.request.Request(f"{base}/api/avatar/alice")
+                with urllib.request.urlopen(req) as resp:
+                    self.assertEqual(resp.status, 200)
+                    self.assertEqual(resp.headers.get_content_type(), "image/png")
+                    self.assertTrue(len(resp.read()) > 0)
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=2)
+
+
 class CoreFailureTest(unittest.TestCase):
     def test_unavailable_core_is_structured(self) -> None:
         client = CoreClient("http://127.0.0.1:1", timeout=0.05)

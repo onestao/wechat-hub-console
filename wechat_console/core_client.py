@@ -207,6 +207,95 @@ class CoreClient:
             query={"query": query, "limit": max(1, min(int(limit), 200))},
         )
 
+    def messages(
+        self,
+        account_id: str,
+        chat_id: str,
+        *,
+        wechat_identity_uuid: str = "",
+        cursor: str = "",
+        limit: int = 100,
+    ) -> dict[str, Any]:
+        account = urllib.parse.quote(account_id, safe="")
+        chat = urllib.parse.quote(chat_id, safe="")
+        query: dict[str, Any] = {"limit": max(1, min(int(limit), 200))}
+        if cursor:
+            query["cursor"] = cursor
+        if wechat_identity_uuid:
+            query["wechat_identity_uuid"] = wechat_identity_uuid
+        return self._json_request(f"/v1/accounts/{account}/chats/{chat}/messages", query=query)
+
+    def identity_contacts(
+        self,
+        wechat_identity_uuid: str,
+        *,
+        query: str = "",
+        limit: int = 100,
+        cursor: str = "",
+    ) -> dict[str, Any]:
+        identity = urllib.parse.quote(wechat_identity_uuid, safe="")
+        q: dict[str, Any] = {"limit": max(1, min(int(limit), 500))}
+        if query:
+            q["query"] = query
+        if cursor:
+            q["cursor"] = cursor
+        return self._json_request(f"/v1/identities/{identity}/contacts", query=q)
+
+    def identity_members(
+        self,
+        wechat_identity_uuid: str,
+        chat_id: str,
+        *,
+        query: str = "",
+        limit: int = 200,
+        cursor: str = "",
+    ) -> dict[str, Any]:
+        identity = urllib.parse.quote(wechat_identity_uuid, safe="")
+        chat = urllib.parse.quote(chat_id, safe="")
+        q: dict[str, Any] = {"limit": max(1, min(int(limit), 500))}
+        if query:
+            q["query"] = query
+        if cursor:
+            q["cursor"] = cursor
+        return self._json_request(f"/v1/identities/{identity}/chats/{chat}/members", query=q)
+
+    def identity_profile(self, wechat_identity_uuid: str) -> dict[str, Any]:
+        identity = urllib.parse.quote(wechat_identity_uuid, safe="")
+        return self._json_request(f"/v1/identities/{identity}/profile")
+
+    def avatar(self, path_or_key: str) -> tuple[bytes, str]:
+        stripped = str(path_or_key or "").strip()
+        if stripped.startswith("/"):
+            url = f"{self.base_url}{stripped}"
+        else:
+            key = urllib.parse.quote(stripped, safe="")
+            url = f"{self.base_url}/v1/avatar/{key}"
+        request = urllib.request.Request(
+            url,
+            headers={
+                "User-Agent": "WeChatConsole/1.0",
+                "Accept": "image/jpeg,image/png,image/webp,image/*;q=0.8",
+            },
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=max(self.timeout, 5.0)) as response:
+                return response.read(), response.headers.get_content_type() or "image/jpeg"
+        except urllib.error.HTTPError as exc:
+            raw = exc.read()
+            try:
+                parsed = json.loads(raw.decode("utf-8"))
+            except Exception:
+                parsed = {}
+            error = parsed.get("error") if isinstance(parsed, dict) else {}
+            raise CoreApiError(
+                exc.code,
+                str(error.get("code") or "avatar_error"),
+                str(error.get("message") or exc.reason or "Avatar request failed"),
+                error.get("details") if isinstance(error.get("details"), dict) else {},
+            ) from exc
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            raise CoreApiError(503, "core_unavailable", str(exc), {}) from exc
+
     def poll_events(
         self,
         *,
@@ -275,12 +364,15 @@ class CoreClient:
         mention_member_ids: list[str] | None = None,
         client_request_id: str = "",
         idempotency_key: str = "",
+        expected_wechat_identity_uuid: str = "",
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "account_id": account_id,
             "chat_id": chat_id,
             "text": text,
         }
+        if expected_wechat_identity_uuid:
+            payload["expected_wechat_identity_uuid"] = expected_wechat_identity_uuid
         if target_message_id:
             payload["target_message_id"] = target_message_id
         if mention_member_ids:
@@ -294,13 +386,23 @@ class CoreClient:
             headers={"Idempotency-Key": idempotency_key} if idempotency_key else {},
         )
 
-    def send_media(self, kind: str, payload: dict[str, Any], *, idempotency_key: str = "") -> dict[str, Any]:
+    def send_media(
+        self,
+        kind: str,
+        payload: dict[str, Any],
+        *,
+        idempotency_key: str = "",
+        expected_wechat_identity_uuid: str = "",
+    ) -> dict[str, Any]:
         if kind not in {"image", "file"}:
             raise ValueError("kind must be image or file")
+        body = dict(payload)
+        if expected_wechat_identity_uuid and "expected_wechat_identity_uuid" not in body:
+            body["expected_wechat_identity_uuid"] = expected_wechat_identity_uuid
         return self._json_request(
             f"/v1/send/{kind}",
             method="POST",
-            payload=payload,
+            payload=body,
             headers={"Idempotency-Key": idempotency_key} if idempotency_key else {},
         )
 

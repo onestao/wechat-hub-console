@@ -75,6 +75,12 @@ export const api = {
     request(`/api/chats?account_id=${enc(accountId)}&query=${enc(query)}`),
   messages: (params) => request(`/api/messages?${new URLSearchParams(params).toString()}`),
   mediaUrl: (mediaId, accountId) => `/api/media/${enc(mediaId)}?account_id=${enc(accountId)}`,
+  contacts: (params = {}) => request(`/api/contacts?${new URLSearchParams(params).toString()}`),
+  groupMembers: (chatId, params = {}) =>
+    request(`/api/chats/${enc(chatId)}/members?${new URLSearchParams(params).toString()}`),
+  identityProfile: (params = {}) =>
+    request(`/api/identity/profile?${new URLSearchParams(params).toString()}`),
+  avatarUrl: (avatarKey) => `/api/avatar/${enc(avatarKey)}`,
 
   sendText: (payload, idempotencyKey) =>
     post("/api/send/text", payload, { "Idempotency-Key": idempotencyKey }),
@@ -90,6 +96,20 @@ export const api = {
   archiveSaved: (savedId) => post(`/api/saved/${enc(savedId)}/archive`),
   deleteSaved: (savedId) => request(`/api/saved/${enc(savedId)}`, { method: "DELETE" }),
   savedMediaUrl: (savedMediaId) => `/api/saved-media/${enc(savedMediaId)}`,
+
+  // Optional WeChat Agent automation surface (proxied to the Agent service).
+  agentStatus: () => request("/api/agent/status"),
+  agentMonitors: () => request("/api/agent/monitors"),
+  saveAgentMonitor: (payload) => post("/api/agent/monitors", payload),
+  deleteAgentMonitor: (monitorId) => request(`/api/agent/monitors/${enc(monitorId)}`, { method: "DELETE" }),
+  agentMonitorRuns: (monitorId) => request(`/api/agent/monitors/${enc(monitorId)}/runs`),
+  agentSchedules: () => request("/api/agent/schedules"),
+  saveAgentSchedule: (payload) => post("/api/agent/schedules", payload),
+  deleteAgentSchedule: (scheduleId) => request(`/api/agent/schedules/${enc(scheduleId)}`, { method: "DELETE" }),
+  agentScheduleRuns: (scheduleId) => request(`/api/agent/schedules/${enc(scheduleId)}/runs`),
+  agentTemplates: () => request("/api/agent/templates"),
+  saveAgentTemplate: (payload) => post("/api/agent/templates", payload),
+  deleteAgentTemplate: (templateId) => request(`/api/agent/templates/${enc(templateId)}`, { method: "DELETE" }),
 
   logs: (params = {}) => request(`/api/logs?${new URLSearchParams(params).toString()}`),
 };
