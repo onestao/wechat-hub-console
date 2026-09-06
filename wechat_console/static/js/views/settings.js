@@ -166,8 +166,8 @@ export function renderSettingsView(container, reloadData, subRoute = "") {
                   <div class="settings-item-title">WeChat Agent</div>
                   <div class="settings-item-text">${
                     isAgentOk
-                      ? "Agent 自动化与 AI 助手模块已连接。"
-                      : "未配置或未运行。配置后可支持大模型智能接话与自动化。"
+                      ? "Agent 自动化服务已连接。支持规则与定时任务中的 AI 总结；独立 AI 助手对话当前版本尚未提供。"
+                      : "未配置或未运行。自动化功能当前不可用；独立 AI 助手对话当前版本尚未提供。"
                   }</div>
                 </div>
                 <span class="pill" data-tone="${isAgentOk ? "brand" : "neutral"}">${

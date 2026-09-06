@@ -814,6 +814,7 @@ let runsDialogEl = null;
 function ensureRunsDialog() {
   if (runsDialogEl) return runsDialogEl;
   runsDialogEl = document.createElement("dialog");
+  runsDialogEl.id = "runsDialog";
   runsDialogEl.className = "modal";
   runsDialogEl.innerHTML = `
     <div class="modal-shell">
@@ -839,6 +840,7 @@ let monitorDialogEl = null;
 function ensureMonitorDialog() {
   if (monitorDialogEl) return monitorDialogEl;
   monitorDialogEl = document.createElement("dialog");
+  monitorDialogEl.id = "monitorDialog";
   monitorDialogEl.className = "modal";
   monitorDialogEl.innerHTML = `
     <div class="modal-shell">
@@ -917,6 +919,7 @@ let scheduleDialogEl = null;
 function ensureScheduleDialog() {
   if (scheduleDialogEl) return scheduleDialogEl;
   scheduleDialogEl = document.createElement("dialog");
+  scheduleDialogEl.id = "scheduleDialog";
   scheduleDialogEl.className = "modal";
   scheduleDialogEl.innerHTML = `
     <div class="modal-shell">
@@ -983,6 +986,7 @@ let templateDialogEl = null;
 function ensureTemplateDialog() {
   if (templateDialogEl) return templateDialogEl;
   templateDialogEl = document.createElement("dialog");
+  templateDialogEl.id = "templateDialog";
   templateDialogEl.className = "modal";
   templateDialogEl.innerHTML = `
     <div class="modal-shell">
