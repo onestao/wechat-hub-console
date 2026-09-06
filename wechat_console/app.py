@@ -356,7 +356,7 @@ def _required_text(payload: dict[str, Any], key: str) -> str:
     return value.strip()
 
 
-def _agent_write(path: str, payload: dict[str, Any]) -> tuple[dict[str, Any], str, str]:
+def _agent_write(service: ConsoleService, path: str, payload: dict[str, Any]) -> tuple[dict[str, Any], str, str]:
     """Dispatch one Agent automation upsert; returns (result, kind, id)."""
     if path == "/api/agent/monitors":
         result = service.agent.upsert_monitor(payload)
@@ -370,7 +370,7 @@ def _agent_write(path: str, payload: dict[str, Any]) -> tuple[dict[str, Any], st
     raise KeyError("endpoint not found")
 
 
-def _agent_delete(path: str) -> tuple[str, str]:
+def _agent_delete(service: ConsoleService, path: str) -> tuple[str, str]:
     """Dispatch one Agent automation delete; returns (kind, id)."""
     if path.startswith("/api/agent/monitors/"):
         monitor_id = unquote(path[len("/api/agent/monitors/") :])
@@ -894,7 +894,7 @@ def create_handler(service: ConsoleService):
                         return
                 agent_prefix = "/api/agent/"
                 if path.startswith(agent_prefix):
-                    result, kind, resource_id = _agent_write(path, payload)
+                    result, kind, resource_id = _agent_write(service, path, payload)
                     _json_response(self, result, 200)
                     service.store.log(
                         "info",
@@ -933,7 +933,7 @@ def create_handler(service: ConsoleService):
                     return
                 agent_prefix = "/api/agent/"
                 if path.startswith(agent_prefix):
-                    kind, resource_id = _agent_delete(path)
+                    kind, resource_id = _agent_delete(service, path)
                     _json_response(self, {"ok": True, "kind": kind, "id": resource_id})
                     service.store.log(
                         "info",
