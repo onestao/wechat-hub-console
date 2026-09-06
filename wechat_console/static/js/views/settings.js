@@ -136,7 +136,7 @@ export function renderSettingsView(container, reloadData, subRoute = "") {
                   <div class="settings-item-text">${
                     isEfbOk
                       ? "Telegram 集成服务已连接并正常运行。"
-                      : "未启用。启用后可以在 Telegram 中收发这些微信的消息。"
+                      : "未启用。当前页面仅显示集成状态，尚未提供 Telegram 集成的启用或配置入口。"
                   }</div>
                 </div>
                 <span class="pill" data-tone="${isEfbOk ? "brand" : "neutral"}">${
