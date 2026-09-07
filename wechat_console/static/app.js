@@ -80,8 +80,16 @@ async function loadAllData() {
       return;
     }
 
-    // Ownership compatibility check: drop if user actively switched to another account
-    if (state.activeAccountId && state.activeAccountId !== effectiveAccountId) {
+    // Ownership compatibility check:
+    // Drop if user actively switched to another account while request was in-flight.
+    // If the requested account vanished from latest status, allow committing effective fallback.
+    const currentIntent = state.activeAccountId || "";
+    const userChangedIntent =
+      currentIntent &&
+      currentIntent !== requestedAccountId &&
+      currentIntent !== effectiveAccountId;
+
+    if (userChangedIntent) {
       return;
     }
 
@@ -288,8 +296,4 @@ if (document.readyState === "loading") {
   initAppShell();
 }
 
-window.__wechatHubState = state;
-window.__wechatHubApp = {
-  loadAllData,
-  getLoadSeq: () => loadAllDataSeq,
-};
+export { loadAllData, loadAllDataSeq };
