@@ -147,10 +147,6 @@ class ConsoleStore:
                 );
                 CREATE INDEX IF NOT EXISTS idx_message_projection_chat_time
                     ON message_projection(account_id, chat_id, created_at DESC, message_id DESC);
-                CREATE INDEX IF NOT EXISTS idx_message_projection_identity_chat_time
-                    ON message_projection(wechat_identity_uuid, chat_id, created_at DESC, message_id DESC);
-                CREATE INDEX IF NOT EXISTS idx_message_projection_instance_chat_time
-                    ON message_projection(instance_uuid, chat_id, created_at DESC, message_id DESC);
                 CREATE INDEX IF NOT EXISTS idx_message_projection_type
                     ON message_projection(account_id, chat_id, type);
 
