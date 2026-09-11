@@ -355,7 +355,7 @@ class ConsoleStore:
                     str(message.get("filename") or ""),
                     str(message.get("mime_type") or ""),
                     str(message.get("target_message_id") or ""),
-                    _json(message),
+                    "{}",
                     now,
                 ),
             )
@@ -456,15 +456,17 @@ class ConsoleStore:
 
     @staticmethod
     def _message_from_row(row: sqlite3.Row) -> dict[str, Any]:
-        try:
-            payload = json.loads(row["payload_json"] or "{}")
-        except json.JSONDecodeError:
-            payload = {}
+        row_keys = row.keys() if hasattr(row, "keys") else []
+        payload = {}
+        if "payload_json" in row_keys and row["payload_json"]:
+            try:
+                payload = json.loads(row["payload_json"] or "{}")
+            except (json.JSONDecodeError, TypeError):
+                payload = {}
         try:
             author = json.loads(row["author_json"] or "{}")
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, TypeError):
             author = {}
-        row_keys = row.keys() if hasattr(row, "keys") else []
         output = {
             "account_id": row["account_id"],
             "message_id": row["message_id"],

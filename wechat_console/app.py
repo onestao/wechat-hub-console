@@ -138,6 +138,23 @@ class ConsoleService:
                             "Events stored locally but Core acknowledgement failed",
                             {"code": exc.code, "message": exc.message, "event_ids": event_ids},
                         )
+                has_more = bool(page.get("has_more"))
+                stream_head = page.get("stream_head_cursor")
+                checkpoint_cursor = int(next_cursor) if has_more else (int(stream_head) if stream_head is not None else int(next_cursor))
+                try:
+                    last_id = event_ids[-1] if event_ids else ""
+                    self.core.checkpoint_events(
+                        self.consumer_id,
+                        checkpoint_cursor,
+                        last_event_id=last_id,
+                    )
+                except Exception as exc:
+                    self.store.log(
+                        "warn",
+                        "core-sync",
+                        "Checkpoint reporting failed; local cursor retained",
+                        {"error": str(exc), "cursor": checkpoint_cursor},
+                    )
                 total += len(events)
                 if not events or not page.get("has_more"):
                     break

@@ -351,6 +351,28 @@ class CoreClient:
             payload={"consumer_id": consumer_id, "event_ids": event_ids},
         )
 
+    def checkpoint_events(
+        self,
+        consumer_id: str,
+        processed_through_cursor: int,
+        *,
+        last_event_id: str = "",
+        subscription_account_id: str = "",
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "consumer_id": consumer_id,
+            "processed_through_cursor": int(processed_through_cursor),
+        }
+        if last_event_id:
+            payload["last_event_id"] = last_event_id
+        if subscription_account_id:
+            payload["subscription_account_id"] = subscription_account_id
+        return self._json_request(
+            "/v1/events/checkpoint",
+            method="POST",
+            payload=payload,
+        )
+
     def media(self, account_id: str, media_id: str) -> tuple[bytes, str, str]:
         media = urllib.parse.quote(media_id, safe="")
         request = urllib.request.Request(
