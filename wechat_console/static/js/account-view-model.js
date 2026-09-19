@@ -89,10 +89,23 @@ export function accountViewModel(runtimeAccount, coreAccount, context = {}) {
       ""
   ).trim();
 
-  // C1 fallback chain: nickname → logged_in_user(wxid) → display_name.
-  const wechatName = nickname || loggedInUser || "";
+  // P0-3 — Core resolves the presentation identity in this order:
+  // nickname → configured alias → wechat_id → wxid (internal account id).
+  const profileHydration = String(wechatProfile?.profile_hydration || "");
+  const displayNameSource = String(wechatProfile?.display_name_source || "");
+  const resolvedProfileName = String(wechatProfile?.display_name || "").trim();
+  const identityHydrating = profileHydration === "pending" && !nickname;
+  // A wxid may be shown only when it is explicitly labelled as the internal
+  // account id; it must never masquerade as a WeChat nickname.
+  const isInternalAccountId =
+    !nickname && (displayNameSource === "internal_account_id" || (!displayNameSource && Boolean(loggedInUser)));
+
+  // C1 fallback chain: resolved identity → nickname → wxid → Hub display_name.
+  const wechatName = resolvedProfileName || nickname || loggedInUser || "";
   const showHubName = Boolean(wechatName) && wechatName !== name;
-  const displayName = wechatName || name;
+  const displayName = identityHydrating
+    ? "正在读取微信资料…"
+    : wechatName || name;
   const initialGlyph = initial(displayName, "微");
   const avatarSrc = avatarSrcOf(wechatProfile, identityUuid);
   const lastSyncText = coreAccount?.sync?.last_event_at
@@ -112,10 +125,13 @@ export function accountViewModel(runtimeAccount, coreAccount, context = {}) {
   let primaryAction = { id: "start", label: "启动", variant: "secondary" };
 
   const loginFlowState = runtimeAccount?.login_flow_state || "";
+  // P0-2 — an authoritative "online" account must never be rendered as a login
+  // failure just because a login socket timed out earlier.
   const hasLoginError =
-    loginFlowState === "error" ||
-    loginFlowState === "timeout" ||
-    Boolean(runtimeAccount?.login_flow_error);
+    coreAccount?.state !== "online" &&
+    (loginFlowState === "error" ||
+      loginFlowState === "timeout" ||
+      Boolean(runtimeAccount?.login_flow_error));
   const isWaitingScan =
     coreAccount?.state === "login_required" ||
     Boolean(runtimeAccount?.snapshot_available) ||
@@ -250,6 +266,11 @@ export function accountViewModel(runtimeAccount, coreAccount, context = {}) {
     showHubName,
     nickname,
     wechatUserId,
+    // P0-3 — identity presentation metadata for the UI.
+    identityHydrating,
+    displayNameSource,
+    isInternalAccountId,
+    profileHydration,
     identityBindingState,
     identityMismatch,
     mismatchInfo: {

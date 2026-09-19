@@ -191,10 +191,17 @@ export function renderStage(dialog, payload) {
   const isMobile = window.innerWidth <= 767;
 
   // C5 — the online title prefers the real WeChat identity over the Hub name.
+  // P0-3 — while Core is still reading the WeChat profile, say so instead of
+  // showing a wxid as if it were the nickname.
   const onlineProfile = payload.wechat_profile || {};
-  const onlineRealName =
-    String(onlineProfile.nickname || "").trim() ||
-    String(payload.logged_in_user || "").trim();
+  const hydrationPending =
+    String(onlineProfile.profile_hydration || "") === "pending" &&
+    !String(onlineProfile.nickname || "").trim();
+  const onlineRealName = hydrationPending
+    ? "正在读取微信资料…"
+    : String(onlineProfile.nickname || "").trim() ||
+      String(onlineProfile.display_name || "").trim() ||
+      String(payload.logged_in_user || "").trim();
   const onlineTitleName = onlineRealName || name;
 
   let modalTitle = `登录${escapeHtml(name)}`;

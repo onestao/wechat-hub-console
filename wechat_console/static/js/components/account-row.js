@@ -46,6 +46,18 @@ export function renderAccountRow(
       )}</span>`
     : "";
 
+  // P0-3 — a wxid may only be shown as what it is: the internal account id.
+  // It must never be presented as if it were the WeChat nickname.
+  const internalIdBadgeHtml = vm.isInternalAccountId
+    ? `<span class="pill" data-tone="neutral" title="这是微信内部账号 ID，不是微信昵称">内部账号 ID</span>`
+    : "";
+
+  // P0-3 — while Core is still reading the WeChat profile, say so instead of
+  // showing a fallback that looks like a real name.
+  const hydratingHtml = vm.identityHydrating
+    ? `<span class="hub-name" data-state="loading">正在读取微信资料…</span>`
+    : "";
+
   const hintHtml =
     showHint && vm.hint ? `<span>${escapeHtml(vm.hint)}</span>` : "";
 
@@ -86,10 +98,10 @@ export function renderAccountRow(
       )}</span>${avatarPhotoHtml}</div>
       <div class="row-body">
         <div class="row-title">
-          <strong>${escapeHtml(vm.displayName)}</strong>${pillHtml}
+          <strong>${escapeHtml(vm.displayName)}</strong>${pillHtml}${internalIdBadgeHtml}
         </div>
         <div class="row-meta">
-          ${hubNameHtml}${statusMarkup(vm.tone, vm.statusText)}${hintHtml}
+          ${hubNameHtml}${hydratingHtml}${statusMarkup(vm.tone, vm.statusText)}${hintHtml}
         </div>
         ${syncHtml}
       </div>
