@@ -43,6 +43,47 @@ DEFAULT_ARCHIVE_DIR = DEFAULT_RUNTIME_DIR / "saved-attachments"
 
 AVATAR_CACHE_TTL_SECONDS = 300.0
 AVATAR_NEGATIVE_TTL_SECONDS = 30.0
+
+# A send is "settled" once it can no longer change without a new user action.
+TERMINAL_SEND_STATES = frozenset({"sent", "failed", "uncertain"})
+
+# Product-facing text for a failed send.  The Console never renders an internal
+# exception or traceback to a normal user; Core supplies ``user_message`` and
+# this map is the local fallback for older/unknown codes.
+SEND_FAILURE_DISPLAY: dict[str, str] = {
+    "wechat_not_ready": "微信正在完成登录，请稍候。",
+    "wechat_unavailable": "微信客户端当前不可用，请稍后重试。",
+    "sender_unavailable": "发送服务暂不可用，请稍后重试。",
+    "send_timeout": "发送超时，请稍后重试。",
+    "target_unavailable": "目标会话已不可用，请刷新后重试。",
+    "operator_gui_busy": "微信界面正在被手动操作，请稍后重试。",
+    "delivery_confirmation_timeout": "微信已接收提交，但未能确认送达结果，请核对后决定是否重发。",
+    "sender_interrupted": "发送过程被中断，送达状态未知，请核对后决定是否重发。",
+    "agent_wechat_delivery_unknown": "未能确认微信是否已接收，请核对后决定是否重发。",
+    "sender_failed": "发送失败，请稍后重试。",
+}
+
+
+def send_display_message(item: dict[str, Any]) -> str:
+    """Human-readable reason for a non-``sent`` send, never a raw traceback."""
+
+    status = str(item.get("status") or "")
+    if status == "sent":
+        return ""
+    error = item.get("error") if isinstance(item.get("error"), dict) else {}
+    details = item.get("details") if isinstance(item.get("details"), dict) else {}
+    failure = details.get("failure") if isinstance(details.get("failure"), dict) else {}
+    for candidate in (failure.get("user_message"), error.get("user_message")):
+        if str(candidate or "").strip():
+            return str(candidate).strip()
+    code = str(failure.get("code") or error.get("code") or "").strip()
+    if code and code in SEND_FAILURE_DISPLAY:
+        return SEND_FAILURE_DISPLAY[code]
+    if status == "uncertain":
+        return "未能确认微信是否已接收，请核对后决定是否重发。"
+    if status == "failed":
+        return SEND_FAILURE_DISPLAY["sender_failed"]
+    return ""
 AVATAR_MAX_BYTES = 2 * 1024 * 1024
 AVATAR_ALLOWED_ID = re.compile(r"^[0-9a-zA-Z_@.-]{1,128}$")
 
@@ -70,6 +111,7 @@ class ConsoleService:
         self._stop = threading.Event()
         self._sync_thread: threading.Thread | None = None
         self._sync_lock = threading.Lock()
+        self._bootstrap_attempted = False
         self._avatar_cache: dict[str, tuple[float, bytes, str]] = {}
         self._avatar_negative: dict[str, float] = {}
         self._avatar_lock = threading.Lock()
@@ -84,6 +126,54 @@ class ConsoleService:
     @property
     def core_url(self) -> str:
         return self.core.base_url
+
+    def ensure_consumer_bootstrap(self) -> dict[str, Any]:
+        """Perform the Console's governed Core consumer bootstrap exactly once.
+
+        Core refuses a cold poll at cursor 0 for a registered consumer
+        (``missing_bootstrap_provenance``).  Without this, the Console's event
+        sync fails on every cycle, ``core_events`` stays empty, and a send that
+        Core already failed keeps showing "正在排队发送…" forever.
+        """
+
+        self._bootstrap_attempted = True
+        result = self.core.bootstrap_consumer(self.consumer_id, mode="at_head")
+        initial_cursor = result.get("initial_cursor")
+        if initial_cursor is not None:
+            # Core assigns the server-side initial cursor; polling below it is
+            # rejected, so adopt it locally before the next poll.
+            self.store.set_cursor(str(initial_cursor))
+        self.store.log("info", "core-sync", "Console Core consumer bootstrapped", result)
+        return result
+
+    def send_status(self, send_id: str) -> dict[str, Any] | None:
+        """Return a send receipt, reconciling a non-terminal local projection.
+
+        The event stream is the primary convergence path; this is the bounded
+        backstop so a send can never be displayed as ``queued`` indefinitely
+        because an update event was missed.
+        """
+
+        item = self.store.get_send(send_id)
+        if item is None:
+            try:
+                remote = self.core.send_status(send_id)
+            except CoreApiError:
+                return None
+            self.store.record_core_send_status(remote)
+            item = self.store.get_send(send_id)
+        elif str(item.get("status") or "") not in TERMINAL_SEND_STATES:
+            try:
+                remote = self.core.send_status(send_id)
+            except CoreApiError:
+                remote = None
+            if isinstance(remote, dict) and str(remote.get("status") or ""):
+                if str(remote.get("status")) != str(item.get("status")) or remote.get("error_code"):
+                    self.store.record_core_send_status(remote)
+                    item = self.store.get_send(send_id)
+        if item is None:
+            return None
+        return {**item, "display_message": send_display_message(item)}
 
     def start_background_sync(self, interval_seconds: float = 2.0) -> None:
         if self._sync_thread and self._sync_thread.is_alive():
@@ -117,12 +207,27 @@ class ConsoleService:
             while pages < max(1, min(int(max_pages), 20)):
                 pages += 1
                 after = self.store.cursor()
-                page = self.core.poll_events(
-                    after=after,
-                    limit=200,
-                    consumer_id=self.consumer_id,
-                    timeout=0,
-                )
+                try:
+                    page = self.core.poll_events(
+                        after=after,
+                        limit=200,
+                        consumer_id=self.consumer_id,
+                        timeout=0,
+                    )
+                except CoreApiError as exc:
+                    if str(exc.code) != "missing_bootstrap_provenance" or self._bootstrap_attempted:
+                        raise
+                    # First-party Console with no local cursor: perform the
+                    # governed bootstrap, adopt the server-assigned cursor and
+                    # retry the same page instead of dropping the cycle.
+                    self.ensure_consumer_bootstrap()
+                    after = self.store.cursor()
+                    page = self.core.poll_events(
+                        after=after,
+                        limit=200,
+                        consumer_id=self.consumer_id,
+                        timeout=0,
+                    )
                 events = [event for event in (page.get("events") or []) if isinstance(event, dict)]
                 next_cursor = str(page.get("next_cursor") or after)
                 self.store.ingest_events(events, next_cursor)
@@ -789,7 +894,7 @@ def create_handler(service: ConsoleService):
                 if path.startswith(send_prefix):
                     send_id = unquote(path[len(send_prefix) :])
                     if "/" not in send_id:
-                        item = service.store.get_send(send_id)
+                        item = service.send_status(send_id)
                         if not item:
                             raise KeyError("send not found")
                         _json_response(self, item)

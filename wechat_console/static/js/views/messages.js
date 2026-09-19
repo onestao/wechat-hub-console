@@ -656,7 +656,13 @@ export function renderMessagesView(container, reloadData, options = {}) {
       }
 
       const failTitle = sr.kind === "image" ? "图片发送失败" : sr.kind === "file" ? "文件发送失败" : "发送失败";
-      const failText = sr.error || (sr.kind === "image" ? "微信没有接收这张图片，可以重新选择发送。" : sr.kind === "file" ? "微信没有接收该文件，可以重新选择发送。" : "微信没有接收这条消息，可以重新发送。");
+      // Never render an internal error object/stack to a normal user: prefer the
+      // product-facing reason Core attached to the receipt.
+      const rawError = typeof sr.error === "string" ? sr.error : "";
+      const failText =
+        sr.display_message ||
+        rawError ||
+        (sr.kind === "image" ? "微信没有接收这张图片，可以重新选择发送。" : sr.kind === "file" ? "微信没有接收该文件，可以重新选择发送。" : "微信没有接收这条消息，可以重新发送。");
 
       sendStatusBannerHtml = `
         <div class="send-result" data-state="failed">
@@ -1201,6 +1207,19 @@ export function renderMessagesView(container, reloadData, options = {}) {
     };
   }
 
+  const recheckSendBtn = container.querySelector("#msgRecheckSendBtn");
+  if (recheckSendBtn && state.sendResult?.send_id) {
+    recheckSendBtn.onclick = () => {
+      watchSendStatus(
+        state.sendResult.send_id,
+        { kind: state.sendResult.kind, text: state.sendResult.text, filename: state.sendResult.filename },
+        container,
+        reloadData,
+        captureMessageOwnerContext(),
+      );
+    };
+  }
+
   const forceRetryBtn = container.querySelector("#msgForceRetrySendBtn");
   if (forceRetryBtn && state.sendResult?.text) {
     forceRetryBtn.onclick = async () => {
@@ -1304,6 +1323,7 @@ function watchSendStatus(sendId, payloadInfo, container, reloadData, originConte
           automatic_retry: send.automatic_retry,
           echo_message_id: send.echo_message_id,
           error: send.error,
+          display_message: send.display_message || "",
           kind,
           text,
           filename,
@@ -1332,6 +1352,17 @@ function watchSendStatus(sendId, payloadInfo, container, reloadData, originConte
         if (watcherToken === sendWatcherSeq && isCurrentMessageOwner(context)) {
           activeSendWatcher = setTimeout(check, delay);
         }
+      } else if (watcherToken === sendWatcherSeq && isCurrentMessageOwner(context)) {
+        // Bounded watcher: a send must never be left rendered as an indefinite
+        // "正在排队发送…".  Surface an explicit, honest state instead.
+        setState({
+          sendResult: {
+            ...(state.sendResult || {}),
+            status: "unconfirmed",
+            display_message: "发送状态长时间未确认，请核对微信是否已收到，再决定是否重发。",
+          },
+        });
+        renderMessagesView(container, reloadData);
       }
     } catch (err) {
       if (watcherToken !== sendWatcherSeq || !isCurrentMessageOwner(context)) {
@@ -1342,6 +1373,15 @@ function watchSendStatus(sendId, payloadInfo, container, reloadData, originConte
         if (watcherToken === sendWatcherSeq && isCurrentMessageOwner(context)) {
           activeSendWatcher = setTimeout(check, 2000);
         }
+      } else if (watcherToken === sendWatcherSeq && isCurrentMessageOwner(context)) {
+        setState({
+          sendResult: {
+            ...(state.sendResult || {}),
+            status: "unconfirmed",
+            display_message: "无法确认发送状态，请刷新后核对微信是否已收到。",
+          },
+        });
+        renderMessagesView(container, reloadData);
       }
     }
   };

@@ -40,10 +40,23 @@ export function capabilitiesOf(account, { coreCapabilities = null } = {}) {
   const running = Boolean(account?.running ?? runtime.running);
   const agentHealthy = provider !== "agent_wechat" || account?.agent_server_healthy !== false;
 
+  // Core reports the authoritative send readiness per account (`send_ready`),
+  // derived from the live login/client observation.  A declared capability is
+  // necessary but not sufficient: an AgentWechat account that is still logging
+  // in advertises `text: true` yet must not accept user messages, otherwise the
+  // Console shows "正在排队发送…" for a message Core will never dispatch.
+  const hasReadiness = account != null && typeof account.send_ready === "boolean";
+  const sendReady = hasReadiness ? Boolean(account.send_ready) : true;
+  const readinessReason = String(account?.send_blocked_message || "").trim();
+  const declaredText = Boolean(caps.text);
+  const declaredImage = Boolean(caps.image);
+  const declaredFile = Boolean(caps.file);
+
   return {
-    canSendText: Boolean(caps.text),
-    canSendImage: Boolean(caps.image),
-    canSendFile: Boolean(caps.file),
+    canSendText: declaredText && sendReady,
+    canSendImage: declaredImage && sendReady,
+    canSendFile: declaredFile && sendReady,
+    sendReady,
     canOpenDesktop: running && agentHealthy,
     canLogin: running && agentHealthy,
     canRestart: true,
@@ -51,11 +64,13 @@ export function capabilitiesOf(account, { coreCapabilities = null } = {}) {
     providerLabel: PROVIDER_LABELS[provider],
     providerTechnical: PROVIDER_TECHNICAL[provider],
     /** Short reason shown when sending is unavailable — no engineering jargon. */
-    sendDisabledReason: caps.text
-      ? ""
-      : provider === "legacy"
+    sendDisabledReason: !declaredText
+      ? provider === "legacy"
         ? "这个微信当前不支持从 Console 发送消息。"
-        : "这个微信暂时不能发送消息。",
+        : "这个微信暂时不能发送消息。"
+      : !sendReady
+        ? readinessReason || "微信正在完成登录，请稍候。"
+        : "",
   };
 }
 

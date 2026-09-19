@@ -373,6 +373,37 @@ class CoreClient:
             payload=payload,
         )
 
+    def bootstrap_consumer(
+        self,
+        consumer_id: str,
+        *,
+        mode: str = "at_head",
+        window: dict[str, Any] | None = None,
+        operator_token: str = "",
+    ) -> dict[str, Any]:
+        """Governed consumer bootstrap.
+
+        Core refuses a cold poll at cursor 0 for any registered consumer, so a
+        first-party Console that has no local cursor must bootstrap explicitly
+        before it can ingest events.  ``at_head`` is idempotent server-side.
+        """
+
+        payload: dict[str, Any] = {"consumer_id": consumer_id, "mode": mode}
+        if window:
+            payload["window"] = dict(window)
+        if operator_token:
+            payload["operator_token"] = operator_token
+        return self._json_request(
+            "/v1/consumers/bootstrap",
+            method="POST",
+            payload=payload,
+        )
+
+    def send_status(self, send_id: str) -> dict[str, Any]:
+        """Authoritative send receipt straight from Core (no event dependency)."""
+
+        return self._json_request(f"/v1/sends/{urllib.parse.quote(str(send_id), safe='')}")
+
     def media(self, account_id: str, media_id: str) -> tuple[bytes, str, str]:
         media = urllib.parse.quote(media_id, safe="")
         request = urllib.request.Request(

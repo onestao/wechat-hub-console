@@ -248,6 +248,18 @@ class ConsoleStore:
     def cursor(self) -> str:
         return self.get_meta("core_event_cursor", "")
 
+    def set_cursor(self, value: str) -> None:
+        """Persist the local Core event cursor (used after a governed bootstrap)."""
+
+        with self._lock, self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO console_meta(key, value, updated_at) VALUES ('core_event_cursor', ?, ?)
+                ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at
+                """,
+                (str(value or ""), utc_now()),
+            )
+
     def ingest_events(self, events: list[dict[str, Any]], next_cursor: str) -> list[str]:
         ingested_ids: list[str] = []
         now = utc_now()
@@ -423,6 +435,46 @@ class ConsoleStore:
     def record_send_receipt(self, receipt: dict[str, Any]) -> None:
         with self._lock, self.connect() as conn:
             self._upsert_send_receipt_conn(conn, receipt)
+
+    def record_core_send_status(self, payload: dict[str, Any]) -> None:
+        """Project an authoritative Core send receipt onto the local mirror.
+
+        Used by the convergence reconciliation path: when the local projection
+        is still non-terminal, the Console asks Core directly instead of
+        waiting for an event that may never arrive.
+        """
+
+        send_id = str(payload.get("send_id") or "").strip()
+        if not send_id:
+            return
+        receipt: dict[str, Any] = {
+            "send_id": send_id,
+            "account_id": str(payload.get("account_id") or ""),
+            "chat_id": str(payload.get("chat_id") or ""),
+            "kind": str(payload.get("kind") or ""),
+            "status": str(payload.get("status") or "accepted"),
+            "echo_message_id": str(payload.get("echo_message_id") or ""),
+            "delivery_certainty": str(payload.get("delivery_certainty") or ""),
+            "accepted_at": str(payload.get("accepted_at") or ""),
+        }
+        if "automatic_retry" in payload and payload.get("automatic_retry") is not None:
+            receipt["automatic_retry"] = bool(payload.get("automatic_retry"))
+        error: dict[str, Any] = {}
+        if payload.get("error_code") or payload.get("error_message") or payload.get("user_message"):
+            error = {
+                "code": str(payload.get("error_code") or "sender_failed"),
+                "message": str(payload.get("error_message") or ""),
+                "user_message": str(payload.get("user_message") or ""),
+            }
+        details = payload.get("details") if isinstance(payload.get("details"), dict) else {}
+        with self._lock, self.connect() as conn:
+            self._upsert_send_receipt_conn(
+                conn,
+                receipt,
+                error=error,
+                details=details,
+                updated_at=str(payload.get("updated_at") or "") or None,
+            )
 
     def get_send(self, send_id: str) -> dict[str, Any] | None:
         with self.connect() as conn:
