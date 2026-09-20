@@ -162,8 +162,17 @@ async function pollStatus() {
  */
 export function resolveLoginPhase(payload) {
   if (!payload) return "starting";
+  if (
+    payload.state === "online" ||
+    payload.login_state === "READY" ||
+    payload.login_state === "LOGGED_IN" ||
+    payload.login_state === "WECHAT_LOGGED_IN" ||
+    payload.login_state === "IDENTITY_HYDRATING" ||
+    payload.auth_status === "logged_in"
+  ) {
+    return "online";
+  }
   if (payload.agent_server_healthy === false) return "degraded";
-  if (payload.state === "online") return "online";
   if (payload.state === "stopped") return "stopped";
   if (
     payload.state === "error" ||
@@ -175,8 +184,8 @@ export function resolveLoginPhase(payload) {
     return "error";
   }
   if (payload.state === "attention") return "attention";
-  if (payload.login_flow_state === "phone_confirm") return "phone_confirm";
-  if (payload.state === "waiting" || payload.snapshot_available) return "waiting";
+  if (payload.login_flow_state === "phone_confirm" || payload.login_state === "PHONE_CONFIRM_PENDING") return "phone_confirm";
+  if (payload.state === "waiting" || payload.snapshot_available || payload.login_state === "QR_READY") return "waiting";
   return "starting";
 }
 
@@ -195,12 +204,14 @@ export function renderStage(dialog, payload) {
   // showing a wxid as if it were the nickname.
   const onlineProfile = payload.wechat_profile || {};
   const hydrationPending =
-    String(onlineProfile.profile_hydration || "") === "pending" &&
+    (String(onlineProfile.profile_hydration || "") === "pending" ||
+      payload.login_state === "IDENTITY_HYDRATING") &&
     !String(onlineProfile.nickname || "").trim();
   const onlineRealName = hydrationPending
     ? "正在读取微信资料…"
     : String(onlineProfile.nickname || "").trim() ||
       String(onlineProfile.display_name || "").trim() ||
+      String(onlineProfile.alias || "").trim() ||
       String(payload.logged_in_user || "").trim();
   const onlineTitleName = onlineRealName || name;
 
@@ -578,4 +589,6 @@ export async function openDesktopEntry(accountId) {
   }
 }
 
-window.__loginFlowModule = { resolveLoginPhase, startLogin, stopPolling, openDesktopEntry };
+if (typeof window !== "undefined") {
+  window.__loginFlowModule = { resolveLoginPhase, startLogin, stopPolling, openDesktopEntry };
+}

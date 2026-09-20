@@ -90,7 +90,7 @@ export function accountViewModel(runtimeAccount, coreAccount, context = {}) {
   ).trim();
 
   // P0-3 — Core resolves the presentation identity in this order:
-  // nickname → configured alias → wechat_id → wxid (internal account id).
+  // real nickname → configured display alias → public WeChat ID → wxid fallback.
   const profileHydration = String(wechatProfile?.profile_hydration || "");
   const displayNameSource = String(wechatProfile?.display_name_source || "");
   const resolvedProfileName = String(wechatProfile?.display_name || "").trim();
@@ -98,7 +98,9 @@ export function accountViewModel(runtimeAccount, coreAccount, context = {}) {
   // A wxid may be shown only when it is explicitly labelled as the internal
   // account id; it must never masquerade as a WeChat nickname.
   const isInternalAccountId =
-    !nickname && (displayNameSource === "internal_account_id" || (!displayNameSource && Boolean(loggedInUser)));
+    !identityHydrating &&
+    !nickname &&
+    (displayNameSource === "internal_account_id" || (!displayNameSource && Boolean(loggedInUser)));
 
   // C1 fallback chain: resolved identity → nickname → wxid → Hub display_name.
   const wechatName = resolvedProfileName || nickname || loggedInUser || "";

@@ -199,3 +199,71 @@ test("C10-9 rename payload mapping keeps alias untouched (view-model side)", () 
   assert.equal(vm.hubName, "工作微信");
   assert.equal(typeof vm.advanced.instanceUuid, "string");
 });
+
+test("C10-10 hydration pending displays '正在读取微信资料…' instead of wxid", () => {
+  const vm = accountViewModel(
+    boundRuntimeAccount({
+      wechat_profile: {
+        wechat_user_id: "wxid_7ugft7xlkf5a22_4117",
+        nickname: "",
+        profile_hydration: "pending",
+        display_name_source: "internal_account_id",
+      },
+    }),
+    boundCoreAccount({
+      wechat_profile: {
+        wechat_user_id: "wxid_7ugft7xlkf5a22_4117",
+        nickname: "",
+        profile_hydration: "pending",
+        display_name_source: "internal_account_id",
+      },
+    }),
+    {}
+  );
+  assert.equal(vm.displayName, "正在读取微信资料…");
+  assert.equal(vm.identityHydrating, true);
+  assert.equal(vm.isInternalAccountId, false);
+});
+
+test("C10-11 resolved display name hierarchy respects real nickname over alias", () => {
+  const vm = accountViewModel(
+    boundRuntimeAccount({
+      wechat_profile: {
+        wechat_user_id: "wxid_7ugft7xlkf5a22_4117",
+        nickname: "真实昵称",
+        display_name: "真实昵称",
+        display_name_source: "nickname",
+        alias: "arasial",
+        profile_hydration: "complete",
+      },
+    }),
+    boundCoreAccount(),
+    {}
+  );
+  assert.equal(vm.displayName, "真实昵称");
+  assert.equal(vm.identityHydrating, false);
+  assert.equal(vm.isInternalAccountId, false);
+});
+
+test("C10-12 login phase autoconverges to online on READY, LOGGED_IN or IDENTITY_HYDRATING", async () => {
+  const { resolveLoginPhase } = await import(
+    "../../static/js/components/login-flow.js"
+  );
+  assert.equal(resolveLoginPhase({ login_state: "READY" }), "online");
+  assert.equal(resolveLoginPhase({ login_state: "LOGGED_IN" }), "online");
+  assert.equal(resolveLoginPhase({ login_state: "IDENTITY_HYDRATING" }), "online");
+  assert.equal(
+    resolveLoginPhase({
+      login_flow_state: "phone_confirm",
+      login_state: "READY",
+    }),
+    "online"
+  );
+  assert.equal(
+    resolveLoginPhase({
+      login_flow_state: "timeout",
+      auth_status: "logged_in",
+    }),
+    "online"
+  );
+});
