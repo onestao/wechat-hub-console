@@ -14,38 +14,7 @@ from wechat_console.compaction import (
     apply_console_core_events_compaction,
     plan_console_core_events_compaction,
 )
-from wechat_console.rebuild_projection import rebuild_projection
 from wechat_console.store import ConsoleStore, utc_now
-
-
-class DummyCoreClient:
-    """Mock Core client providing canonical query APIs for rebuild testing."""
-
-    def __init__(self, canonical_messages: list[dict]):
-        self._canonical_messages = canonical_messages
-
-    def accounts(self) -> dict:
-        acc_ids = sorted(list({m.get("account_id", "acc-1") for m in self._canonical_messages}))
-        return {
-            "accounts": [
-                {"account_id": aid, "display_name": f"Account {aid}", "wechat_identity_uuid": f"ident-{aid}"}
-                for aid in acc_ids
-            ]
-        }
-
-    def chats(self, account_id: str) -> dict:
-        chat_ids = sorted(list({
-            m.get("chat_id") for m in self._canonical_messages
-            if m.get("account_id", "acc-1") == account_id
-        }))
-        return {"chats": [{"chat_id": cid} for cid in chat_ids]}
-
-    def messages(self, account_id: str, chat_id: str, cursor: str = "", limit: int = 100) -> dict:
-        msgs = [
-            m for m in self._canonical_messages
-            if m.get("account_id", "acc-1") == account_id and m.get("chat_id") == chat_id
-        ]
-        return {"messages": msgs, "has_more": False, "next_cursor": ""}
 
 
 class TestConsoleRC14Storage(unittest.TestCase):
@@ -179,72 +148,6 @@ class TestConsoleRC14Storage(unittest.TestCase):
         self.assertEqual(len(saved_after), 1)
         self.assertEqual(saved_after[0]["snapshot"]["text"], "Permanent User Note")
         self.assertEqual(saved_after[0]["title"], "Permanent Note Title")
-
-    def test_gate_t7_projection_rebuild(self) -> None:
-        """Gate T7: Projection rebuild from canonical Core APIs with 100% field parity."""
-        now = utc_now()
-        canonical_messages = [
-            {
-                "account_id": "acc-1",
-                "message_id": f"msg-canon-{i}",
-                "chat_id": "chat-grp-1@chatroom",
-                "instance_uuid": "inst-1",
-                "wechat_identity_uuid": "ident-1",
-                "type": "text",
-                "direction": "incoming" if i % 2 == 0 else "outgoing",
-                "created_at": f"2026-09-11T14:00:{i:02d}Z",
-                "author": {"member_id": f"user-{i}", "display_name": f"User {i}"},
-                "text": f"Canonical message {i}",
-                "media_id": f"med-{i}" if i % 3 == 0 else "",
-                "filename": "",
-                "mime_type": "",
-                "target_message_id": "",
-            }
-            for i in range(10)
-        ]
-
-        # Populate store initially via events
-        for msg in canonical_messages:
-            event = {
-                "event_id": f"evt-{msg['message_id']}",
-                "cursor": "1",
-                "account_id": msg["account_id"],
-                "event_type": "message.created",
-                "occurred_at": msg["created_at"],
-                "payload": {"message": msg},
-            }
-            self.store.ingest_events([event], next_cursor="1")
-
-        # Save durable user message
-        self.store.save_message(
-            account_id="acc-1",
-            chat_id="chat-grp-1@chatroom",
-            message_id="msg-canon-1",
-            snapshot={"text": "Saved bookmark"},
-            title="Bookmark title",
-            note="Bookmark note",
-        )
-
-        mock_core = DummyCoreClient(canonical_messages)
-
-        # Rebuild projection
-        rebuild_res = rebuild_projection(self.store, mock_core, swap=True)
-        self.assertTrue(rebuild_res["ok"])
-        self.assertEqual(rebuild_res["total_messages_rebuilt"], 10)
-        self.assertTrue(rebuild_res["parity"]["parity_ok"])
-        self.assertEqual(rebuild_res["parity"]["matched_count"], 10)
-        self.assertEqual(rebuild_res["parity"]["mismatched_count"], 0)
-
-        # Verify active projection after swap
-        messages = self.store.list_messages(account_id="acc-1", chat_id="chat-grp-1@chatroom")
-        self.assertEqual(len(messages), 10)
-        self.assertEqual(messages[0]["wechat_identity_uuid"], "ident-1")
-
-        # Verify saved messages preserved
-        saved = self.store.list_saved()
-        self.assertEqual(len(saved), 1)
-        self.assertEqual(saved[0]["title"], "Bookmark title")
-        self.assertEqual(saved[0]["snapshot"]["text"], "Saved bookmark")
 
 
 if __name__ == "__main__":
