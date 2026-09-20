@@ -337,8 +337,8 @@ class ConsoleStore:
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
                 ON CONFLICT(account_id, message_id) DO UPDATE SET
                     chat_id=excluded.chat_id,
-                    instance_uuid=CASE WHEN excluded.instance_uuid<>'' THEN excluded.instance_uuid ELSE message_projection.instance_uuid END,
-                    wechat_identity_uuid=CASE WHEN excluded.wechat_identity_uuid<>'' THEN excluded.wechat_identity_uuid ELSE message_projection.wechat_identity_uuid END,
+                    instance_uuid=CASE WHEN message_projection.instance_uuid<>'' THEN message_projection.instance_uuid ELSE excluded.instance_uuid END,
+                    wechat_identity_uuid=CASE WHEN message_projection.wechat_identity_uuid<>'' THEN message_projection.wechat_identity_uuid ELSE excluded.wechat_identity_uuid END,
                     type=excluded.type,
                     created_at=excluded.created_at,
                     direction=excluded.direction,
@@ -562,15 +562,15 @@ class ConsoleStore:
     ) -> MessagePage:
         clauses = ["1=1"]
         params: list[Any] = []
+        if account_id:
+            clauses.append("account_id=?")
+            params.append(account_id)
+        if instance_uuid:
+            clauses.append("instance_uuid=?")
+            params.append(instance_uuid)
         if wechat_identity_uuid:
             clauses.append("wechat_identity_uuid=?")
             params.append(wechat_identity_uuid)
-        elif instance_uuid:
-            clauses.append("instance_uuid=?")
-            params.append(instance_uuid)
-        elif account_id:
-            clauses.append("account_id=?")
-            params.append(account_id)
 
         if chat_id:
             clauses.append("chat_id=?")

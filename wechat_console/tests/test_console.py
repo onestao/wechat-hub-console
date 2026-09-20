@@ -602,6 +602,123 @@ class ConsoleIntegrationTest(unittest.TestCase):
         ident2_chat_a = self.service.store.list_messages(wechat_identity_uuid="ident-2", chat_id="chat-a")
         self.assertEqual([m["message_id"] for m in ident2_chat_a], ["scope-msg-3"])
 
+    def test_console_scope_intersection_store_and_http_api(self) -> None:
+        """Verify multi-scope intersection on Console Store and HTTP API:
+        account_id AND instance_uuid AND wechat_identity_uuid AND chat_id.
+        Specifically tests that wrong account / instance with correct identity returns 0.
+        """
+        acc_target = "acc-target"
+        inst_target = "inst-target-uuid"
+        ident_target = "ident-target-uuid"
+        chat_target = "chat-target@chatroom"
+        msg_target_id = "msg-target-scope-001"
+
+        # Ingest target message
+        self.service.store.ingest_events(
+            [
+                {
+                    "event_id": "evt-scope-intersection-1",
+                    "cursor": "401",
+                    "account_id": acc_target,
+                    "event_type": "message.created",
+                    "occurred_at": "2026-09-20T12:00:00Z",
+                    "payload": {
+                        "instance_uuid": inst_target,
+                        "wechat_identity_uuid": ident_target,
+                        "message": {
+                            "account_id": acc_target,
+                            "instance_uuid": inst_target,
+                            "wechat_identity_uuid": ident_target,
+                            "message_id": msg_target_id,
+                            "chat_id": chat_target,
+                            "type": "text",
+                            "created_at": "2026-09-20T12:00:00Z",
+                            "text": "Target scoped intersection message",
+                        },
+                    },
+                }
+            ],
+            "402",
+        )
+
+        # 1. Direct Store list_messages tests
+        # Correct account + correct instance + correct identity -> 1 message
+        page = self.service.store.list_messages(
+            account_id=acc_target,
+            instance_uuid=inst_target,
+            wechat_identity_uuid=ident_target,
+            chat_id=chat_target,
+        )
+        msgs = list(page)
+        self.assertEqual(len(msgs), 1)
+        self.assertEqual(msgs[0]["message_id"], msg_target_id)
+
+        # Wrong account + correct instance + correct identity -> 0
+        page_wrong_acc = self.service.store.list_messages(
+            account_id="wrong-account",
+            instance_uuid=inst_target,
+            wechat_identity_uuid=ident_target,
+            chat_id=chat_target,
+        )
+        self.assertEqual(len(list(page_wrong_acc)), 0)
+
+        # Correct account + wrong instance + correct identity -> 0
+        page_wrong_inst = self.service.store.list_messages(
+            account_id=acc_target,
+            instance_uuid="wrong-instance",
+            wechat_identity_uuid=ident_target,
+            chat_id=chat_target,
+        )
+        self.assertEqual(len(list(page_wrong_inst)), 0)
+
+        # Correct account + correct instance + wrong identity -> 0
+        page_wrong_ident = self.service.store.list_messages(
+            account_id=acc_target,
+            instance_uuid=inst_target,
+            wechat_identity_uuid="wrong-identity",
+            chat_id=chat_target,
+        )
+        self.assertEqual(len(list(page_wrong_ident)), 0)
+
+        # 2. HTTP API GET /api/messages tests
+        server = create_server("127.0.0.1", 0, self.service)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        base = f"http://127.0.0.1:{server.server_port}"
+        try:
+            # 正确 account + 正确 instance + 正确 identity -> 返回消息
+            st, data = self.request(
+                f"{base}/api/messages?account_id={acc_target}&instance_uuid={inst_target}&wechat_identity_uuid={ident_target}&chat_id={chat_target}"
+            )
+            self.assertEqual(st, 200)
+            self.assertEqual(len(data.get("messages", [])), 1)
+            self.assertEqual(data["messages"][0]["message_id"], msg_target_id)
+
+            # 错误 account + 正确 instance + 正确 identity -> 0
+            st, data = self.request(
+                f"{base}/api/messages?account_id=wrong-account&instance_uuid={inst_target}&wechat_identity_uuid={ident_target}&chat_id={chat_target}"
+            )
+            self.assertEqual(st, 200)
+            self.assertEqual(len(data.get("messages", [])), 0)
+
+            # 正确 account + 错误 instance + 正确 identity -> 0
+            st, data = self.request(
+                f"{base}/api/messages?account_id={acc_target}&instance_uuid=wrong-instance&wechat_identity_uuid={ident_target}&chat_id={chat_target}"
+            )
+            self.assertEqual(st, 200)
+            self.assertEqual(len(data.get("messages", [])), 0)
+
+            # 正确 account + 正确 instance + 错误 identity -> 0
+            st, data = self.request(
+                f"{base}/api/messages?account_id={acc_target}&instance_uuid={inst_target}&wechat_identity_uuid=wrong-identity&chat_id={chat_target}"
+            )
+            self.assertEqual(st, 200)
+            self.assertEqual(len(data.get("messages", [])), 0)
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join()
+
     def test_send_forwards_expected_wechat_identity_uuid(self) -> None:
         server = create_server("127.0.0.1", 0, self.service)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
