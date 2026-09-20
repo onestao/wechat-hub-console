@@ -1033,6 +1033,12 @@ def create_handler(service: ConsoleService):
                 if path == "/api/consumers":
                     _json_response(self, service.consumers())
                     return
+                if path == "/api/events/poll":
+                    since = _query_text(query, "since") or _query_text(query, "after")
+                    timeout = _query_int(query, "timeout", 20, 0, 30)
+                    events = service.poll_console_events(since=since, timeout=timeout)
+                    _json_response(self, {"events": events, "cursor": service.store.cursor()})
+                    return
                 agent_prefix = "/api/agent/"
                 if path.startswith(agent_prefix):
                     self._handle_agent_get(path, query)
@@ -1058,12 +1064,6 @@ def create_handler(service: ConsoleService):
                 return
             if path == "/api/agent/templates":
                 _json_response(self, {"templates": service.agent.templates()})
-                return
-            if path == "/api/events/poll":
-                since = _query_text(query, "since") or _query_text(query, "after")
-                timeout = _query_int(query, "timeout", 20, 0, 30)
-                events = service.poll_console_events(since=since, timeout=timeout)
-                _json_response(self, {"events": events, "cursor": service.store.cursor()})
                 return
             if path.startswith("/api/agent/monitors/"):
                 monitor_id = unquote(path[len("/api/agent/monitors/") :])
