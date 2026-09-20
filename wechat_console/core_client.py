@@ -333,6 +333,8 @@ class CoreClient:
         consumer_id: str = "wechat-console",
         timeout: int = 0,
     ) -> dict[str, Any]:
+        int_timeout = max(0, min(int(timeout), 30))
+        http_timeout = max(self.timeout, float(int_timeout) + 5.0) if int_timeout > 0 else self.timeout
         return self._json_request(
             "/v1/events/poll",
             query={
@@ -340,8 +342,9 @@ class CoreClient:
                 "limit": max(1, min(int(limit), 200)),
                 "account_id": account_id,
                 "consumer_id": consumer_id,
-                "timeout": max(0, min(int(timeout), 30)),
+                "timeout": int_timeout,
             },
+            timeout=http_timeout,
         )
 
     def ack_events(self, consumer_id: str, event_ids: list[str]) -> dict[str, Any]:
