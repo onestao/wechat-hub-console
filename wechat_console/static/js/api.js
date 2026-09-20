@@ -57,6 +57,8 @@ const enc = encodeURIComponent;
 export const api = {
   status: () => request("/api/status"),
   syncEvents: () => post("/api/events/sync"),
+  pollEvents: (params = {}) =>
+    request(`/api/events/poll?${new URLSearchParams(params).toString()}`),
 
   runtimeAccounts: () => request("/api/runtime/accounts"),
   createAccount: (payload) => post("/api/runtime/accounts", payload),

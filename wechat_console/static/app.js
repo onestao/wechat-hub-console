@@ -274,7 +274,49 @@ function initAppShell() {
   // Initial Data Load
   loadAllData();
 
-  // 30s background poll
+  // Real-time Core Event Long-Polling Loop
+  let eventCursor = "";
+  let isPollingEvents = false;
+
+  async function pollLoop() {
+    if (isPollingEvents) return;
+    isPollingEvents = true;
+    while (true) {
+      if (document.visibilityState !== "visible") {
+        await new Promise((r) => setTimeout(r, 2000));
+        continue;
+      }
+      try {
+        const res = await api.pollEvents({ since: eventCursor, timeout: 20 });
+        if (res && res.cursor) {
+          eventCursor = res.cursor;
+        }
+        const events = (res && res.events) || [];
+        if (events.length > 0) {
+          const hasBusinessEvents = events.some((e) =>
+            [
+              "message.created",
+              "message.updated",
+              "send.updated",
+              "chat.updated",
+              "account.status",
+              "identity.binding_changed",
+            ].includes(e.event_type)
+          );
+          if (hasBusinessEvents) {
+            loadAllData();
+          }
+        }
+      } catch (err) {
+        // Backoff slightly on transient error
+        await new Promise((r) => setTimeout(r, 4000));
+      }
+    }
+  }
+
+  pollLoop();
+
+  // 30s background poll safety fallback
   setInterval(() => {
     if (state.autoRefresh !== false) {
       loadAllData();

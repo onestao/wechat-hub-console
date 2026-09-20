@@ -294,6 +294,49 @@ class ConsoleStore:
                 )
         return ingested_ids
 
+    def list_events_since(self, since: str = "", limit: int = 100) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            if since:
+                try:
+                    since_int = int(since)
+                    rows = conn.execute(
+                        """
+                        SELECT * FROM core_events
+                        WHERE CAST(cursor AS INTEGER) > ?
+                        ORDER BY CAST(cursor AS INTEGER) ASC LIMIT ?
+                        """,
+                        (since_int, limit),
+                    ).fetchall()
+                except ValueError:
+                    rows = conn.execute(
+                        """
+                        SELECT * FROM core_events
+                        WHERE cursor > ?
+                        ORDER BY cursor ASC LIMIT ?
+                        """,
+                        (since, limit),
+                    ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT * FROM core_events
+                    ORDER BY CAST(cursor AS INTEGER) DESC LIMIT ?
+                    """,
+                    (limit,),
+                ).fetchall()
+                rows.reverse()
+        return [
+            {
+                "event_id": row["event_id"],
+                "cursor": row["cursor"],
+                "account_id": row["account_id"],
+                "event_type": row["event_type"],
+                "occurred_at": row["occurred_at"],
+                "payload": json.loads(row["payload_json"] or "{}"),
+            }
+            for row in rows
+        ]
+
     def _apply_event(
         self,
         conn: sqlite3.Connection,

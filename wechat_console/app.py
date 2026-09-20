@@ -116,6 +116,7 @@ class ConsoleService:
         self._avatar_cache: dict[str, tuple[float, bytes, str]] = {}
         self._avatar_negative: dict[str, float] = {}
         self._avatar_lock = threading.Lock()
+        self._event_condition = threading.Condition()
         self.last_sync: dict[str, Any] = {
             "ok": None,
             "at": "",
@@ -184,10 +185,14 @@ class ConsoleService:
         def loop() -> None:
             while not self._stop.is_set():
                 try:
-                    self.sync_events_once(max_pages=5)
+                    res = self.sync_events_once(max_pages=5, timeout=20)
+                    if res.get("events", 0) > 0:
+                        continue
                 except Exception as exc:  # defensive: loop must not kill Console
                     self.store.log("error", "core-sync", "Core event sync failed", {"error": str(exc)})
-                self._stop.wait(interval)
+                    self._stop.wait(interval)
+                else:
+                    self._stop.wait(0.1)
 
         self._sync_thread = threading.Thread(target=loop, daemon=True, name="console-core-events")
         self._sync_thread.start()
@@ -197,7 +202,7 @@ class ConsoleService:
         if self._sync_thread and self._sync_thread.is_alive():
             self._sync_thread.join(timeout=2)
 
-    def sync_events_once(self, *, max_pages: int = 3) -> dict[str, Any]:
+    def sync_events_once(self, *, max_pages: int = 3, timeout: int = 0) -> dict[str, Any]:
         if not self._sync_lock.acquire(blocking=False):
             return {"ok": True, "skipped": True, "reason": "sync_already_running", **self.last_sync}
         try:
@@ -208,12 +213,13 @@ class ConsoleService:
             while pages < max(1, min(int(max_pages), 20)):
                 pages += 1
                 after = self.store.cursor()
+                current_timeout = timeout if pages == 1 else 0
                 try:
                     page = self.core.poll_events(
                         after=after,
                         limit=200,
                         consumer_id=self.consumer_id,
-                        timeout=0,
+                        timeout=current_timeout,
                     )
                 except CoreApiError as exc:
                     if str(exc.code) != "missing_bootstrap_provenance" or self._bootstrap_attempted:
@@ -227,11 +233,14 @@ class ConsoleService:
                         after=after,
                         limit=200,
                         consumer_id=self.consumer_id,
-                        timeout=0,
+                        timeout=current_timeout,
                     )
                 events = [event for event in (page.get("events") or []) if isinstance(event, dict)]
                 next_cursor = str(page.get("next_cursor") or after)
                 self.store.ingest_events(events, next_cursor)
+                if events:
+                    with self._event_condition:
+                        self._event_condition.notify_all()
                 event_ids = [str(event.get("event_id") or "") for event in events if event.get("event_id")]
                 if event_ids:
                     try:
@@ -289,6 +298,18 @@ class ConsoleService:
             return dict(self.last_sync)
         finally:
             self._sync_lock.release()
+
+    def poll_console_events(self, since: str = "", timeout: float = 20.0) -> list[dict[str, Any]]:
+        deadline = time.monotonic() + max(0.0, min(float(timeout), 30.0))
+        while True:
+            events = self.store.list_events_since(since)
+            if events or timeout <= 0:
+                return events
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return []
+            with self._event_condition:
+                self._event_condition.wait(timeout=min(remaining, 1.0))
 
     def status(self) -> dict[str, Any]:
         try:
@@ -1037,6 +1058,12 @@ def create_handler(service: ConsoleService):
                 return
             if path == "/api/agent/templates":
                 _json_response(self, {"templates": service.agent.templates()})
+                return
+            if path == "/api/events/poll":
+                since = _query_text(query, "since") or _query_text(query, "after")
+                timeout = _query_int(query, "timeout", 20, 0, 30)
+                events = service.poll_console_events(since=since, timeout=timeout)
+                _json_response(self, {"events": events, "cursor": service.store.cursor()})
                 return
             if path.startswith("/api/agent/monitors/"):
                 monitor_id = unquote(path[len("/api/agent/monitors/") :])
