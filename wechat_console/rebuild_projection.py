@@ -352,7 +352,7 @@ def rebuild_projection(
 
     # 1. Discover accounts from Core
     accounts_data = core_client.accounts()
-    accounts = accounts_data.get("accounts") or []
+    accounts = accounts_data.get("accounts") if isinstance(accounts_data, dict) else (accounts_data or [])
 
     total_ingested = 0
 
