@@ -120,4 +120,12 @@ export const api = {
   deleteAgentTemplate: (templateId) => request(`/api/agent/templates/${enc(templateId)}`, { method: "DELETE" }),
 
   logs: (params = {}) => request(`/api/logs?${new URLSearchParams(params).toString()}`),
+
+  // Consumer Control (Disabled / EFB / Agent).  The Runtime owns the container
+  // lifecycle; Console only ever talks to Core, never to the Docker socket.
+  installStatus: () => request("/api/install/status"),
+  consumers: () => request("/api/consumers"),
+  setConsumerMode: (mode) => post("/api/consumers/mode", { mode }),
+  startConsumer: (consumer) => post(`/api/consumers/${enc(consumer)}/start`, {}),
+  stopConsumer: (consumer) => post(`/api/consumers/${enc(consumer)}/stop`, {}),
 };

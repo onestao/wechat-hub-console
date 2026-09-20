@@ -404,6 +404,33 @@ class CoreClient:
 
         return self._json_request(f"/v1/sends/{urllib.parse.quote(str(send_id), safe='')}")
 
+    def consumers(self) -> dict[str, Any]:
+        """Consumer Control snapshot (Disabled / EFB / Agent).
+
+        This is the ONLY source of truth for whether a consumer is running: the
+        Runtime owns the container lifecycle and reports it through Core.  A
+        reachability probe against the consumer's own port is not a state source.
+        """
+
+        return self._json_request("/v1/consumers")
+
+    def set_consumer_mode(self, mode: str) -> dict[str, Any]:
+        return self._json_request(
+            "/v1/consumers/mode", method="POST", payload={"mode": str(mode or "").strip().lower()}
+        )
+
+    def consumer_action(self, consumer: str, operation: str) -> dict[str, Any]:
+        consumer = urllib.parse.quote(str(consumer or "").strip().lower(), safe="")
+        operation = urllib.parse.quote(str(operation or "").strip().lower(), safe="")
+        return self._json_request(
+            f"/v1/consumers/{consumer}/{operation}", method="POST", payload={}
+        )
+
+    def install_status(self) -> dict[str, Any]:
+        """Factory Fresh first-install status (product-level business states)."""
+
+        return self._json_request("/v1/install/status")
+
     def media(self, account_id: str, media_id: str) -> tuple[bytes, str, str]:
         media = urllib.parse.quote(media_id, safe="")
         request = urllib.request.Request(

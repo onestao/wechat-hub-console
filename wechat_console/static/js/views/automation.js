@@ -72,9 +72,11 @@ export function renderAutomationView(container, reloadData) {
 
   async function load() {
     const seq = ++refreshSeq;
-    const integration = state.status?.integrations?.agent || {};
-    if (!integration.configured) {
-      if (seq === refreshSeq) renderUnconfigured(body);
+    // Consumer state comes from the Runtime via Core; the Agent's functional
+    // API is only called once the Runtime says the consumer is running.
+    const agentConsumer = state.status?.install?.agent || {};
+    if (String(agentConsumer.state || "") !== "running") {
+      if (seq === refreshSeq) renderUnconfigured(body, agentConsumer);
       return;
     }
     const [statusRes, monitorsRes, schedulesRes, templatesRes] = await Promise.allSettled([
@@ -108,14 +110,23 @@ export function renderAutomationView(container, reloadData) {
 
 /* ---------------------------------------------------------------- states */
 
-function renderUnconfigured(container) {
+function renderUnconfigured(container, entry = {}) {
+  const stateLabel = {
+    running: "运行中",
+    stopped: "已停止",
+    failed: "启动失败",
+    not_configured: "未配置",
+    not_provisioned: "未创建",
+  }[String(entry?.state || "")] || "未运行";
+  const detail = String(entry?.last_error || entry?.blocked_reason || "");
   container.innerHTML = `
     <div class="surface">
       <div class="empty">
         <div class="empty-icon">${icon("automation")}</div>
-        <div class="empty-title">自动化服务未启用</div>
+        <div class="empty-title">自动化服务未启用（${escapeHtml(stateLabel)}）</div>
         <p class="empty-text">${escapeHtml(AGENT_UNCONFIGURED_TEXT)}</p>
-        <p class="empty-text">如需使用自动回复、消息关注和定时任务，请在部署中启用 wechat-agent 服务，并在 Console 配置 WECHAT_AGENT_URL 指向该服务。</p>
+        <p class="empty-text">请在「设置 → AI 助手」中启动 Agent 消费者。自动化功能由 Runtime 管理其生命周期。</p>
+        ${detail ? `<p class="empty-text mono" style="color: var(--text-secondary);">${escapeHtml(detail)}</p>` : ""}
       </div>
     </div>
     ${renderAiCapabilityNote()}

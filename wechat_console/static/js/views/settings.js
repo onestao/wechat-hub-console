@@ -19,6 +19,75 @@ import { capabilitySummary } from "../capabilities.js";
 let activeTab = "general"; // "general" | "wechat" | "telegram" | "ai" | "storage" | "diagnostics"
 let loadedLogs = [];
 
+/** Business label for one consumer lifecycle state (Runtime is the authority). */
+function consumerStateLabel(entry) {
+  const labels = {
+    running: "运行中",
+    stopped: "已停止",
+    failed: "启动失败",
+    not_provisioned: "未创建",
+    not_configured: "未配置",
+    unknown: "状态未知",
+  };
+  const state = String(entry?.state || "unknown");
+  return labels[state] || state;
+}
+
+function consumerTone(entry) {
+  const state = String(entry?.state || "unknown");
+  if (state === "running") return "brand";
+  if (state === "failed") return "danger";
+  return "neutral";
+}
+
+/** One consumer control card: the real Runtime state plus start / stop. */
+function renderConsumerCard(consumer, entry, { description }) {
+  const running = Boolean(entry?.running);
+  const canStart = Boolean(entry?.can_start);
+  const blocked = String(entry?.blocked_reason || "");
+  const lastError = String(entry?.last_error || "");
+  const body = running ? "正在运行。" : blocked || "当前未运行。";
+  return `
+    <div class="section">
+      <div class="section-head">
+        <div class="section-head-text"><h2 class="section-title">${escapeHtml(
+          entry?.display_name || consumer,
+        )}</h2></div>
+      </div>
+      <div class="surface surface-flush">
+        <div class="settings-group">
+          <div class="settings-item">
+            <div class="settings-item-body">
+              <div class="settings-item-title">${escapeHtml(description)}</div>
+              <div class="settings-item-text">${escapeHtml(body)}</div>
+              ${
+                lastError
+                  ? `<div class="settings-item-text mono" style="color: var(--danger);">${escapeHtml(lastError)}</div>`
+                  : ""
+              }
+            </div>
+            <span class="pill" data-tone="${consumerTone(entry)}">${escapeHtml(consumerStateLabel(entry))}</span>
+          </div>
+          <div class="settings-item">
+            <div class="settings-item-body">
+              <div class="settings-item-title">控制</div>
+              <div class="settings-item-text">同一时刻只能运行一个消费者（EFB 与 Agent 互斥）。</div>
+            </div>
+            <div style="display: flex; gap: 8px;">
+              <button class="btn btn-primary btn-sm" data-consumer-action="start" data-consumer="${escapeAttr(
+                consumer,
+              )}" ${running || !canStart ? "disabled" : ""}>启动</button>
+              <button class="btn btn-secondary btn-sm" data-consumer-action="stop" data-consumer="${escapeAttr(
+                consumer,
+              )}" ${running ? "" : "disabled"}>停止</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 /**
  * Render Settings View.
  * @param {HTMLElement} container
@@ -28,12 +97,17 @@ let loadedLogs = [];
 export function renderSettingsView(container, reloadData, subRoute = "") {
   if (subRoute === "advanced" || subRoute === "diagnostics") {
     activeTab = "diagnostics";
+  } else if (["general", "wechat", "telegram", "ai", "storage"].includes(subRoute)) {
+    // Deep link from the home page (e.g. #/settings/ai) selects that tab.
+    activeTab = subRoute;
   }
 
   const status = state.status || {};
   const core = status.core || {};
   const sync = status.sync || {};
-  const integrations = status.integrations || {};
+  // Consumer state comes exclusively from the Runtime via Core.  A reachable
+  // port is not a lifecycle state, so there is no liveness probe here.
+  const install = status.install || {};
   const runtimeMgmt = status.runtime_management || state.runtimeManagement || {};
 
   const tabs = [
@@ -120,64 +194,16 @@ export function renderSettingsView(container, reloadData, subRoute = "") {
     }
 
     case "telegram": {
-      const efb = integrations.efb || {};
-      const isEfbOk = Boolean(efb.configured && efb.ok);
-      panelHtml = `
-        <div class="section">
-          <div class="section-head">
-            <div class="section-head-text"><h2 class="section-title">Telegram 集成</h2></div>
-          </div>
-          <div class="surface surface-flush">
-            <div class="settings-group">
-              <div class="settings-item">
-                <div class="avatar avatar-sm">${icon("telegram", { size: "sm" })}</div>
-                <div class="settings-item-body">
-                  <div class="settings-item-title">Telegram 集成</div>
-                  <div class="settings-item-text">${
-                    isEfbOk
-                      ? "Telegram 集成服务已连接并正常运行。"
-                      : "未启用。当前页面仅显示集成状态，尚未提供 Telegram 集成的启用或配置入口。"
-                  }</div>
-                </div>
-                <span class="pill" data-tone="${isEfbOk ? "brand" : "neutral"}">${
-        isEfbOk ? "已启用" : "未启用"
-      }</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      `;
+      panelHtml = renderConsumerCard("efb", install.efb || {}, {
+        description: "把微信消息转发到 Telegram，并把 Telegram 回复发回微信。",
+      });
       break;
     }
 
     case "ai": {
-      const agent = integrations.agent || {};
-      const isAgentOk = Boolean(agent.configured && agent.ok);
-      panelHtml = `
-        <div class="section">
-          <div class="section-head">
-            <div class="section-head-text"><h2 class="section-title">AI 助手</h2></div>
-          </div>
-          <div class="surface surface-flush">
-            <div class="settings-group">
-              <div class="settings-item">
-                <div class="avatar avatar-sm">${icon("sparkle", { size: "sm" })}</div>
-                <div class="settings-item-body">
-                  <div class="settings-item-title">WeChat Agent</div>
-                  <div class="settings-item-text">${
-                    isAgentOk
-                      ? "Agent 自动化服务已连接。支持规则与定时任务中的 AI 总结；独立 AI 助手对话当前版本尚未提供。"
-                      : "未配置或未运行。自动化功能当前不可用；独立 AI 助手对话当前版本尚未提供。"
-                  }</div>
-                </div>
-                <span class="pill" data-tone="${isAgentOk ? "brand" : "neutral"}">${
-        isAgentOk ? "在线" : "未配置"
-      }</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      `;
+      panelHtml = renderConsumerCard("agent", install.agent || {}, {
+        description: "内置消息消费者：在 Console 内直接处理消息，无需外部凭据。",
+      });
       break;
     }
 
@@ -207,8 +233,9 @@ export function renderSettingsView(container, reloadData, subRoute = "") {
     case "diagnostics": {
       // Build Services List
       const isCoreOk = Boolean(core.ok);
-      const isAgentOk = Boolean(integrations.agent?.ok);
-      const isEfbOk = Boolean(integrations.efb?.ok);
+      // Consumer state is the Runtime's, never a reachability probe.
+      const isAgentOk = String(install.agent?.state || "") === "running";
+      const isEfbOk = String(install.efb?.state || "") === "running";
 
       // Build Accounts details dl.kv
       const runtimeAccounts = state.runtimeAccounts || [];
@@ -298,26 +325,37 @@ export function renderSettingsView(container, reloadData, subRoute = "") {
                 <div class="row-body">
                   <div class="row-title">
                     <strong>wechat-agent</strong>
-                    <span class="pill" data-tone="${isAgentOk ? "brand" : "neutral"}">${
-        isAgentOk ? "可选 · 在线" : "可选 · 未配置"
-      }</span>
+                    <span class="pill" data-tone="${isAgentOk ? "brand" : "neutral"}">${escapeHtml(
+                      `可选 · ${consumerStateLabel(install.agent)}`,
+                    )}</span>
                   </div>
-                  <div class="row-meta">${
-                    isAgentOk ? "自动化与模型助手已连接。" : "未配置属于正常状态。"
-                  }</div>
+                  <div class="row-meta mono">${escapeHtml(
+                    String(install.agent?.container_name || "wechat-hub-agent"),
+                  )} · ${escapeHtml(String(install.agent?.state || "unknown"))}</div>
                 </div>
               </div>
               <div class="row">
                 <div class="row-body">
                   <div class="row-title">
-                    <strong>efb-multi</strong>
-                    <span class="pill" data-tone="${isEfbOk ? "brand" : "neutral"}">${
-        isEfbOk ? "可选 · 在线" : "可选 · 未配置"
-      }</span>
+                    <strong>wechat-hub-efb</strong>
+                    <span class="pill" data-tone="${isEfbOk ? "brand" : "neutral"}">${escapeHtml(
+                      `可选 · ${consumerStateLabel(install.efb)}`,
+                    )}</span>
                   </div>
-                  <div class="row-meta">${
-                    isEfbOk ? "Telegram 桥接集成运行中。" : "Telegram 集成未运行。"
-                  }</div>
+                  <div class="row-meta mono">${escapeHtml(
+                    String(install.efb?.container_name || "wechat-hub-efb"),
+                  )} · ${escapeHtml(String(install.efb?.state || "unknown"))}</div>
+                </div>
+              </div>
+              <div class="row">
+                <div class="row-body">
+                  <div class="row-title">
+                    <strong>consumer mode</strong>
+                    <span class="pill">${escapeHtml(String(install.consumer_mode || "unknown"))}</span>
+                  </div>
+                  <div class="row-meta mono">mutual_exclusion=${
+                    install.mutual_exclusion ? "true" : "false"
+                  } · desired=${escapeHtml(String(install.desired_mode || "unknown"))}</div>
                 </div>
               </div>
             </div>
@@ -389,6 +427,28 @@ export function renderSettingsView(container, reloadData, subRoute = "") {
     btn.onclick = () => {
       activeTab = btn.dataset.tab;
       renderSettingsView(container, reloadData);
+    };
+  });
+
+  // Wire Consumer Control actions (start / stop).  The Runtime performs the
+  // lifecycle change and enforces EFB XOR Agent; the Console only asks Core.
+  container.querySelectorAll("[data-consumer-action]").forEach((btn) => {
+    btn.onclick = async () => {
+      const consumer = btn.dataset.consumer;
+      const action = btn.dataset.consumerAction;
+      btn.disabled = true;
+      try {
+        if (action === "start") {
+          await api.startConsumer(consumer);
+        } else {
+          await api.stopConsumer(consumer);
+        }
+        toast(action === "start" ? "已启动" : "已停止");
+        await reloadData();
+      } catch (err) {
+        toast({ title: "操作失败", text: err?.message || String(err), tone: "bad" });
+        btn.disabled = false;
+      }
     };
   });
 

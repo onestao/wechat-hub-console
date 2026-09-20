@@ -243,6 +243,56 @@ export function renderHomeView(container, reloadData) {
     `;
   }
 
+  // 1b. System status: business-level only.  Technical fields live in
+  // Settings -> Advanced & Diagnostics.
+  const install = state.status?.install || {};
+  const systemState = coreOk && String(install.runtime?.state || "") !== "attention" ? "ready" : "attention";
+  const systemLabel = systemState === "ready" ? "Ready" : "Attention";
+  const wechatLabel = {
+    ready: "Ready",
+    not_configured: "Not configured",
+    attention: "Attention",
+    starting: "Starting",
+  }[String(install.wechat?.state || "")] || "--";
+  const consumerLabel = (entry) => {
+    const state = String(entry?.state || "");
+    if (state === "running") return "Running";
+    if (state === "failed") return "Failed";
+    if (state === "not_configured") return "Not configured";
+    if (state === "stopped" || state === "not_provisioned") return "Stopped";
+    return "--";
+  };
+  const systemRow = (name, label, state, target) => `
+    <div class="row" ${target ? `data-system-target="${escapeAttr(target)}" role="button" tabindex="0"` : ""}>
+      <div class="row-body">
+        <div class="row-title">
+          <strong>${escapeHtml(name)}</strong>
+          <span class="pill" data-tone="${
+            state === "ready" || state === "running" ? "brand" : state === "failed" ? "danger" : "neutral"
+          }">${escapeHtml(label)}</span>
+        </div>
+      </div>
+    </div>
+  `;
+  const systemStatusHtml = `
+      <div class="section">
+        <div class="section-head">
+          <div class="section-head-text"><h2 class="section-title">系统状态</h2></div>
+          <button class="btn btn-ghost btn-sm" id="homeSystemSettingsBtn">
+            高级与诊断${icon("chevronRight", { size: "sm" })}
+          </button>
+        </div>
+        <div class="surface surface-flush">
+          <div class="rows">
+            ${systemRow("System", systemLabel, systemState, "")}
+            ${systemRow("WeChat", wechatLabel, String(install.wechat?.state || ""), "accounts")}
+            ${systemRow("EFB", consumerLabel(install.efb), String(install.efb?.state || ""), "settings/telegram")}
+            ${systemRow("Agent", consumerLabel(install.agent), String(install.agent?.state || ""), "settings/ai")}
+          </div>
+        </div>
+      </div>
+  `;
+
   container.innerHTML = `
     <div class="page-inner">
       <div class="page-head">
@@ -253,6 +303,8 @@ export function renderHomeView(container, reloadData) {
       </div>
 
       ${attentionHtml}
+
+      ${systemStatusHtml}
 
       <div class="section">
         <div class="section-head">
@@ -271,6 +323,20 @@ export function renderHomeView(container, reloadData) {
   `;
 
   // Wire navigation buttons
+  const systemSettingsBtn = container.querySelector("#homeSystemSettingsBtn");
+  if (systemSettingsBtn) systemSettingsBtn.onclick = () => navigate("settings/diagnostics");
+  container.querySelectorAll("[data-system-target]").forEach((row) => {
+    const target = row.dataset.systemTarget;
+    if (!target) return;
+    const go = () => navigate(target);
+    row.onclick = go;
+    row.onkeydown = (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        go();
+      }
+    };
+  });
   const manageBtn = container.querySelector("#homeManageAccountsBtn");
   if (manageBtn) manageBtn.onclick = () => navigate("accounts");
 

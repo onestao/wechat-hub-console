@@ -96,16 +96,17 @@ class ConsoleService:
         db_path: str | Path,
         archive_dir: str | Path,
         agent_url: str = "",
-        efb_url: str = "",
         desktop_url: str = "",
         consumer_id: str = "wechat-console",
         core_timeout: float = 5.0,
     ) -> None:
         self.core = CoreClient(core_url, timeout=core_timeout)
         self.store = ConsoleStore(db_path, archive_dir)
+        # ``agent_url`` is the Agent's *functional* API only (automation,
+        # monitors, schedules).  It is never a running/configured state source:
+        # consumer state comes exclusively from the Runtime via Core.
         self.agent = AgentClient(agent_url)
         self.agent_url = agent_url.rstrip("/")
-        self.efb_url = efb_url.rstrip("/")
         self.desktop_url = desktop_url.rstrip("/")
         self.consumer_id = consumer_id
         self._stop = threading.Event()
@@ -352,14 +353,82 @@ class ConsoleService:
             "messages": summary,
             "saved_messages": self.store.saved_count(),
             "sync": self.last_sync,
-            "integrations": self.integration_status(),
+            "install": self.consumer_control_status(),
         }
 
-    def integration_status(self) -> dict[str, Any]:
-        return {
-            "agent": _probe_optional("wechat-agent", self.agent_url),
-            "efb": _probe_optional("efb-multi", self.efb_url),
-        }
+    def consumers(self) -> dict[str, Any]:
+        """Live Consumer Control snapshot (Runtime is the lifecycle owner)."""
+
+        return self.core.consumers()
+
+    def set_consumer_mode(self, mode: str) -> dict[str, Any]:
+        mode = str(mode or "").strip().lower()
+        if mode not in {"disabled", "efb", "agent"}:
+            raise ValueError("mode must be disabled, efb or agent")
+        result = self.core.set_consumer_mode(mode)
+        self.store.log("info", "consumer", f"Consumer mode -> {mode}", result)
+        return result
+
+    def consumer_action(self, consumer: str, operation: str) -> dict[str, Any]:
+        consumer = str(consumer or "").strip().lower()
+        operation = str(operation or "").strip().lower()
+        if consumer not in {"efb", "agent"}:
+            raise KeyError(f"unknown consumer: {consumer}")
+        if operation not in {"start", "stop"}:
+            raise KeyError(f"unknown consumer operation: {operation}")
+        result = self.core.consumer_action(consumer, operation)
+        self.store.log("info", "consumer", f"Consumer {consumer} {operation}", result)
+        return result
+
+    def require_agent_consumer_running(self) -> None:
+        """Fail closed unless the Runtime reports the Agent consumer running.
+
+        A reachable port is not a lifecycle state.  After a stop the container can
+        still answer for a moment, and a stale one could answer forever, so the
+        Console refuses to call the Agent's functional API unless the Runtime --
+        the lifecycle owner -- says the consumer is running.
+        """
+
+        try:
+            snapshot = self.core.consumers()
+        except CoreApiError as exc:
+            raise AgentApiError(503, "consumer_state_unavailable", str(exc), {}) from exc
+        consumers = snapshot.get("consumers") if isinstance(snapshot.get("consumers"), dict) else {}
+        agent = consumers.get("agent") if isinstance(consumers.get("agent"), dict) else {}
+        if not agent.get("running"):
+            raise AgentApiError(
+                409,
+                "agent_not_running",
+                "Agent consumer is not running",
+                {
+                    "state": str(agent.get("state") or "unknown"),
+                    "blocked_reason": str(agent.get("blocked_reason") or ""),
+                    "last_error": str(agent.get("last_error") or ""),
+                },
+            )
+
+    def consumer_control_status(self) -> dict[str, Any]:
+        """Product-level install/consumer status, straight from the Runtime.
+
+        The Console never probes a consumer's own port to decide whether it is
+        running: a reachable port is not a lifecycle state, and a stopped
+        consumer can still answer /health from a stale container.  The single
+        state source is the Runtime ConsumerControl snapshot exposed by Core.
+        """
+
+        try:
+            return self.core.install_status()
+        except CoreApiError as exc:
+            return {
+                "core": {"state": "attention", "error": str(exc)},
+                "runtime": {"state": "unknown", "error": str(exc)},
+                "wechat": {"state": "unknown"},
+                "efb": {"consumer": "efb", "state": "unknown", "configured": False, "running": False, "can_start": False, "blocked_reason": str(exc), "last_error": ""},
+                "agent": {"consumer": "agent", "state": "unknown", "configured": False, "running": False, "can_start": False, "blocked_reason": str(exc), "last_error": ""},
+                "consumer_mode": "unknown",
+                "desired_mode": "unknown",
+                "mutual_exclusion": True,
+            }
 
     def identity_avatar(self, wechat_identity_uuid: str) -> tuple[bytes, str]:
         """Serve a WeChat avatar through Console (Identity v2 contract §2.2).
@@ -550,6 +619,7 @@ def _required_text(payload: dict[str, Any], key: str) -> str:
 
 def _agent_write(service: ConsoleService, path: str, payload: dict[str, Any]) -> tuple[dict[str, Any], str, str]:
     """Dispatch one Agent automation upsert; returns (result, kind, id)."""
+    service.require_agent_consumer_running()
     if path == "/api/agent/monitors":
         result = service.agent.upsert_monitor(payload)
         return result, "monitor", str(result.get("monitor_id") or "")
@@ -564,6 +634,7 @@ def _agent_write(service: ConsoleService, path: str, payload: dict[str, Any]) ->
 
 def _agent_delete(service: ConsoleService, path: str) -> tuple[str, str]:
     """Dispatch one Agent automation delete; returns (kind, id)."""
+    service.require_agent_consumer_running()
     if path.startswith("/api/agent/monitors/"):
         monitor_id = unquote(path[len("/api/agent/monitors/") :])
         if not monitor_id or "/" in monitor_id:
@@ -583,37 +654,6 @@ def _agent_delete(service: ConsoleService, path: str) -> tuple[str, str]:
         service.agent.delete_template(template_id)
         return "template", template_id
     raise KeyError("endpoint not found")
-
-
-def _probe_optional(name: str, base_url: str) -> dict[str, Any]:
-    if not base_url:
-        return {"name": name, "required": False, "configured": False, "ok": None, "url": "", "error": ""}
-    started = time.monotonic()
-    request = urllib.request.Request(base_url.rstrip("/") + "/health", headers={"Accept": "application/json"})
-    try:
-        with urllib.request.urlopen(request, timeout=1.5) as response:
-            response.read(4096)
-            return {
-                "name": name,
-                "required": False,
-                "configured": True,
-                "ok": 200 <= response.status < 400,
-                "url": base_url,
-                "status": response.status,
-                "latency_ms": round((time.monotonic() - started) * 1000),
-                "error": "",
-            }
-    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError) as exc:
-        return {
-            "name": name,
-            "required": False,
-            "configured": True,
-            "ok": False,
-            "url": base_url,
-            "status": getattr(exc, "code", None),
-            "latency_ms": round((time.monotonic() - started) * 1000),
-            "error": str(exc),
-        }
 
 
 def _fetch_avatar(url: str) -> tuple[bytes, str]:
@@ -966,8 +1006,11 @@ def create_handler(service: ConsoleService):
                         },
                     )
                     return
-                if path == "/api/integrations":
-                    _json_response(self, service.integration_status())
+                if path == "/api/install/status":
+                    _json_response(self, service.consumer_control_status())
+                    return
+                if path == "/api/consumers":
+                    _json_response(self, service.consumers())
                     return
                 agent_prefix = "/api/agent/"
                 if path.startswith(agent_prefix):
@@ -981,6 +1024,7 @@ def create_handler(service: ConsoleService):
 
         def _handle_agent_get(self, path: str, query: dict[str, list[str]]) -> None:
             """Proxy the optional Agent automation surface; failures stay structured."""
+            service.require_agent_consumer_running()
             if path == "/api/agent/status":
                 payload = service.agent.status()
                 _json_response(self, {"ok": True, "agent": payload})
@@ -1053,6 +1097,16 @@ def create_handler(service: ConsoleService):
                             result = service.core.runtime_account_action(account_id, action)
                             service.store.log("info", "runtime", f"WeChat account {action}", result)
                         _json_response(self, result)
+                        return
+                if path == "/api/consumers/mode":
+                    _json_response(self, service.set_consumer_mode(_required_text(payload, "mode")))
+                    return
+                consumer_prefix = "/api/consumers/"
+                if path.startswith(consumer_prefix):
+                    suffix = unquote(path[len(consumer_prefix) :]).strip("/")
+                    parts = suffix.split("/")
+                    if len(parts) == 2 and parts[0] and parts[1]:
+                        _json_response(self, service.consumer_action(parts[0], parts[1]))
                         return
                 if path == "/api/send/text":
                     request_id = str(payload.get("client_request_id") or uuid.uuid4().hex)
@@ -1208,7 +1262,6 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--port", type=int, default=int(os.environ.get("WECHAT_CONSOLE_PORT", "8078")))
     parser.add_argument("--core-url", default=os.environ.get("WECHAT_CORE_URL", "http://127.0.0.1:8080"))
     parser.add_argument("--agent-url", default=os.environ.get("WECHAT_AGENT_URL", ""))
-    parser.add_argument("--efb-url", default=os.environ.get("EFB_MULTI_URL", ""))
     parser.add_argument("--desktop-url", default=os.environ.get("WECHAT_DESKTOP_URL", ""))
     parser.add_argument("--db", default=os.environ.get("WECHAT_CONSOLE_DB", str(DEFAULT_DB)))
     parser.add_argument("--archive-dir", default=os.environ.get("WECHAT_CONSOLE_ARCHIVE_DIR", str(DEFAULT_ARCHIVE_DIR)))
@@ -1225,7 +1278,6 @@ def main(argv: list[str] | None = None) -> int:
         db_path=args.db,
         archive_dir=args.archive_dir,
         agent_url=args.agent_url,
-        efb_url=args.efb_url,
         desktop_url=args.desktop_url,
     )
     if not args.no_background_sync:
