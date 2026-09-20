@@ -141,6 +141,54 @@ class MockAgentHandler(BaseHTTPRequestHandler):
         self._json(200, {"ok": True})
 
 
+class _FakeConsumerCoreHandler(BaseHTTPRequestHandler):
+    """Minimal Core that only answers the consumer snapshot.
+
+    The Console no longer treats a reachable Agent port as a lifecycle state, so
+    these proxy tests must supply the Runtime-derived state through Core.
+    """
+
+    agent_running: bool = True
+
+    def log_message(self, *args) -> None:
+        return
+
+    def do_GET(self) -> None:  # noqa: N802
+        path = self.path.split("?", 1)[0].rstrip("/") or "/"
+        if path != "/v1/consumers":
+            self._json(404, {"error": {"code": "not_found", "message": path}})
+            return
+        self._json(
+            200,
+            {
+                "mode": "agent" if self.agent_running else "disabled",
+                "desired_mode": "agent" if self.agent_running else "disabled",
+                "modes": ["disabled", "efb", "agent"],
+                "mutual_exclusion": True,
+                "consumers": {
+                    "efb": {"consumer": "efb", "state": "stopped", "running": False, "can_start": False},
+                    "agent": {
+                        "consumer": "agent",
+                        "state": "running" if self.agent_running else "stopped",
+                        "running": self.agent_running,
+                        "can_start": True,
+                        "blocked_reason": "",
+                        "last_error": "",
+                    },
+                },
+                "runtime": {"available": True},
+            },
+        )
+
+    def _json(self, status: int, payload: dict) -> None:
+        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+
 class AgentProxyIntegrationTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -150,16 +198,24 @@ class AgentProxyIntegrationTest(unittest.TestCase):
         cls.agent_thread = threading.Thread(target=cls.agent_server.serve_forever, daemon=True)
         cls.agent_thread.start()
 
+        cls.consumer_core = ThreadingHTTPServer(
+            ("127.0.0.1", 0), type("BoundConsumerCore", (_FakeConsumerCoreHandler,), {"agent_running": True})
+        )
+        cls.core_url = f"http://127.0.0.1:{cls.consumer_core.server_port}"
+        cls.core_thread = threading.Thread(target=cls.consumer_core.serve_forever, daemon=True)
+        cls.core_thread.start()
+
     @classmethod
     def tearDownClass(cls) -> None:
-        cls.agent_server.shutdown()
-        cls.agent_server.server_close()
-        cls.agent_thread.join(timeout=2)
+        for server, thread in ((cls.agent_server, cls.agent_thread), (cls.consumer_core, cls.core_thread)):
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
 
     def setUp(self) -> None:
         self.temp = __import__("tempfile").TemporaryDirectory()
         self.service = ConsoleService(
-            core_url="http://127.0.0.1:1",  # Core unused in these tests
+            core_url=self.core_url,
             db_path=Path(self.temp.name) / "console.sqlite",
             archive_dir=Path(self.temp.name) / "saved-attachments",
             agent_url=self.agent_url,
@@ -256,12 +312,36 @@ class AgentProxyIntegrationTest(unittest.TestCase):
             server.server_close()
             thread.join(timeout=2)
 
-    def test_unconfigured_agent_reports_structured_honest_error(self) -> None:
+    def test_stopped_agent_consumer_reports_structured_honest_error(self) -> None:
+        """The Agent functional API is refused unless the Runtime reports it running."""
+
+        self.consumer_core.RequestHandlerClass.agent_running = False
+        try:
+            server = create_server("127.0.0.1", 0, self.service)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            base = f"http://127.0.0.1:{server.server_port}"
+            try:
+                for path in ("/api/agent/status", "/api/agent/monitors", "/api/agent/schedules"):
+                    status, payload = self.request(base + path)
+                    self.assertEqual(status, 409, path)
+                    self.assertEqual(payload["error"]["code"], "agent_not_running", path)
+                    self.assertEqual(payload["error"]["details"]["state"], "stopped", path)
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=2)
+        finally:
+            self.consumer_core.RequestHandlerClass.agent_running = True
+
+    def test_unreachable_core_reports_consumer_state_unavailable(self) -> None:
+        """No Runtime snapshot means no answer, never a guess."""
+
         self.service = ConsoleService(
             core_url="http://127.0.0.1:1",
             db_path=Path(self.temp.name) / "console2.sqlite",
             archive_dir=Path(self.temp.name) / "saved-attachments2",
-            agent_url="",
+            agent_url=self.agent_url,
         )
         server = create_server("127.0.0.1", 0, self.service)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -271,7 +351,7 @@ class AgentProxyIntegrationTest(unittest.TestCase):
             for path in ("/api/agent/status", "/api/agent/monitors", "/api/agent/schedules"):
                 status, payload = self.request(base + path)
                 self.assertEqual(status, 503, path)
-                self.assertEqual(payload["error"]["code"], "agent_not_configured", path)
+                self.assertEqual(payload["error"]["code"], "consumer_state_unavailable", path)
         finally:
             server.shutdown()
             server.server_close()
