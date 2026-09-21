@@ -128,6 +128,7 @@ class TestRebuildProjectionFailClosed(unittest.TestCase):
         self.store = ConsoleStore(self.db_path, self.archive_dir)
 
     def tearDown(self) -> None:
+        self.store.close()
         self.temp_dir.cleanup()
 
     def _seed_active_messages(self, messages: list[dict[str, Any]]) -> None:

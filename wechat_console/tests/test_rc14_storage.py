@@ -25,6 +25,7 @@ class TestConsoleRC14Storage(unittest.TestCase):
         self.store = ConsoleStore(self.db_path, self.archive_dir)
 
     def tearDown(self) -> None:
+        self.store.close()
         self.temp_dir.cleanup()
 
     def test_gate_t6_projection_payload_deprecation(self) -> None:
