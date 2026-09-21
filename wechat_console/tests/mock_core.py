@@ -187,7 +187,14 @@ class MockCoreState:
                 "filename": "one-pixel.png",
                 "mime_type": "image/png",
                 "content": SAMPLE_PNG,
-            }
+            },
+            "media-pending-1": {
+                "account_id": "account-beta",
+                "filename": "pending.json",
+                "mime_type": "application/json",
+                "content": b'{"error":{"code":"media_pending","message":"Media content is still downloading in WeChat client"}}',
+                "status_code": 202,
+            },
         }
         self.contacts = {
             "identity-alpha-uuid": [
@@ -876,7 +883,8 @@ class MockCoreHandler(BaseHTTPRequestHandler):
                 if not media or media["account_id"] != account_id:
                     raise ApiError(404, "media_not_found", f"Unknown media_id for {account_id}: {media_id}")
                 content = media["content"]
-                self.send_response(200)
+                status_code = int(media.get("status_code") or 200)
+                self.send_response(status_code)
                 self.send_header("Content-Type", media["mime_type"])
                 self.send_header("Content-Length", str(len(content)))
                 self.send_header("Content-Disposition", f'inline; filename="{media["filename"]}"')

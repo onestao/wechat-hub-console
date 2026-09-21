@@ -589,11 +589,11 @@ export function renderMessagesView(container, reloadData, options = {}) {
           : "";
         if (media.type === "image") {
           attachmentHtml = media.hasMediaReference
-            ? `<div class="bubble-attachment" style="padding: 4px 0;"><img src="${escapeAttr(mediaUrl)}" alt="图片" style="max-width: 100%; max-height: 240px; border-radius: var(--r-sm); object-fit: contain;" /></div>`
+            ? `<div class="bubble-attachment" style="padding: 4px 0;"><img src="${escapeAttr(mediaUrl)}" alt="图片" style="max-width: 100%; max-height: 240px; border-radius: var(--r-sm); object-fit: contain;" onerror="this.onerror=null; this.parentElement.innerHTML='<span>[图片加载中...]</span>';" /></div>`
             : `<div class="bubble-attachment"><span>[图片暂不可预览]</span></div>`;
         } else if (media.type === "sticker") {
           attachmentHtml = media.hasMediaReference
-            ? `<div class="bubble-attachment" style="padding: 4px 0;"><img src="${escapeAttr(mediaUrl)}" alt="表情" style="max-width: 160px; max-height: 160px; object-fit: contain;" /></div>`
+            ? `<div class="bubble-attachment" style="padding: 4px 0;"><img src="${escapeAttr(mediaUrl)}" alt="表情" style="max-width: 160px; max-height: 160px; object-fit: contain;" onerror="this.onerror=null; this.parentElement.innerHTML='<span>[表情加载中...]</span>';" /></div>`
             : `<div class="bubble-attachment"><span>[表情暂不可预览]</span></div>`;
         } else if (media.type === "video") {
           if (media.hasMediaReference) {

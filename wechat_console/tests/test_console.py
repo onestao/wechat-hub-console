@@ -440,6 +440,18 @@ class ConsoleIntegrationTest(unittest.TestCase):
                 self.assertEqual(response.status, 200)
                 self.assertTrue(response.read().startswith(b"\x89PNG"))
 
+            # Test direct /api/media/{media_id} passthrough: ready (200) vs pending (202)
+            with urllib.request.urlopen(base + "/api/media/media-image-1?account_id=account-beta", timeout=2) as response:
+                self.assertEqual(response.status, 200)
+                self.assertEqual(response.headers.get("Content-Type"), "image/png")
+                self.assertTrue(response.read().startswith(b"\x89PNG"))
+
+            with urllib.request.urlopen(base + "/api/media/media-pending-1?account_id=account-beta", timeout=2) as response:
+                self.assertEqual(response.status, 202)
+                self.assertEqual(response.headers.get("Content-Type"), "application/json")
+                pending_payload = json.loads(response.read().decode("utf-8"))
+                self.assertEqual(pending_payload["error"]["code"], "media_pending")
+
             _, deleted = self.request(base + f"/api/saved/{saved['saved_message_id']}", method="DELETE")
             self.assertTrue(deleted["ok"])
             with self.assertRaises(urllib.error.HTTPError) as caught:

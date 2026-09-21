@@ -599,7 +599,9 @@ class ConsoleService:
         filename = str(snapshot.get("filename") or media_id)
         mime_type = str(snapshot.get("mime_type") or "application/octet-stream")
         try:
-            body, core_mime, core_filename = self.core.media(account_id, media_id)
+            status_code, body, core_mime, core_filename = self.core.media(account_id, media_id)
+            if status_code == 202:
+                raise CoreApiError(202, "media_pending", "Media content is still downloading in WeChat client", {"media_id": media_id})
             media = self.store.archive_media(
                 saved_id=saved_id,
                 account_id=account_id,
@@ -991,12 +993,12 @@ def create_handler(service: ConsoleService):
                     account_id = _query_text(query, "account_id")
                     if not account_id:
                         raise ValueError("account_id is required")
-                    body, mime_type, filename = service.core.media(account_id, media_id)
-                    self.send_response(200)
+                    status_code, body, mime_type, filename = service.core.media(account_id, media_id)
+                    self.send_response(status_code)
                     self.send_header("Content-Type", mime_type)
                     self.send_header("Content-Length", str(len(body)))
                     self.send_header("Content-Disposition", f'inline; filename="{filename.replace(chr(34), "")}"')
-                    self.send_header("Cache-Control", "private, max-age=60")
+                    self.send_header("Cache-Control", "no-cache" if status_code == 202 else "private, max-age=60")
                     self.end_headers()
                     self.wfile.write(body)
                     return

@@ -105,7 +105,7 @@ class ConsoleStore:
     def close(self) -> None:
         """Close store and checkpoint WAL for clean directory cleanup without file locks."""
         try:
-            with sqlite3.connect(str(self.db_path), timeout=5) as conn:
+            with self.connect() as conn:
                 conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
         except Exception:
             pass

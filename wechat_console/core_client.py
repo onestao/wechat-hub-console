@@ -434,7 +434,7 @@ class CoreClient:
 
         return self._json_request("/v1/install/status")
 
-    def media(self, account_id: str, media_id: str) -> tuple[bytes, str, str]:
+    def media(self, account_id: str, media_id: str) -> tuple[int, bytes, str, str]:
         media = urllib.parse.quote(media_id, safe="")
         request = urllib.request.Request(
             self._url(f"/v1/media/{media}", {"account_id": account_id}),
@@ -442,11 +442,12 @@ class CoreClient:
         )
         try:
             with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                status_code = getattr(response, "status", None) or response.getcode() or 200
                 body = response.read()
                 mime_type = response.headers.get_content_type() or "application/octet-stream"
                 disposition = response.headers.get("Content-Disposition", "")
                 filename = _filename_from_disposition(disposition) or media_id
-                return body, mime_type, filename
+                return status_code, body, mime_type, filename
         except urllib.error.HTTPError as exc:
             raw = exc.read()
             try:
