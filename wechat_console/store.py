@@ -102,6 +102,14 @@ class ConsoleStore:
         finally:
             conn.close()
 
+    def close(self) -> None:
+        """Close store and checkpoint WAL for clean directory cleanup without file locks."""
+        try:
+            with sqlite3.connect(str(self.db_path), timeout=5) as conn:
+                conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        except Exception:
+            pass
+
     def initialize(self) -> None:
         with self._lock, self.connect() as conn:
             conn.execute("PRAGMA journal_mode=WAL")

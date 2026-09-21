@@ -109,14 +109,27 @@ export function messageMediaViewModel(message) {
   const mediaId = String(message?.media_id || "");
   const rawFilename = String(message?.filename || "");
   const mimeType = String(message?.mime_type || "").toLowerCase();
-  const hasArtifact = Boolean(mediaId && rawFilename && rawFilename !== mediaId);
+  const type = String(message?.type || "");
+
+  const hasMediaReference = Boolean(mediaId);
+  const hasResolvedFilename = Boolean(rawFilename && rawFilename !== mediaId);
+
+  let fileLabel = "";
+  if (type === "file") {
+    fileLabel = hasResolvedFilename ? rawFilename : "文件";
+  }
+
   return {
-    type: String(message?.type || ""),
-    filename: hasArtifact ? rawFilename : "",
+    type,
+    mediaId,
     mimeType,
-    hasArtifact,
-    isImage: hasArtifact && mimeType.startsWith("image/"),
-    isVideo: hasArtifact && mimeType.startsWith("video/"),
+    hasMediaReference,
+    hasResolvedFilename,
+    filename: hasResolvedFilename ? rawFilename : "",
+    fileLabel,
+    hasArtifact: hasMediaReference,
+    isImage: hasMediaReference && (type === "image" || type === "sticker" || mimeType.startsWith("image/")),
+    isVideo: hasMediaReference && (type === "video" || mimeType.startsWith("video/")),
   };
 }
 
@@ -571,36 +584,38 @@ export function renderMessagesView(container, reloadData, options = {}) {
 
         let attachmentHtml = "";
         const media = messageMediaViewModel(m);
-        const mediaUrl = media.hasArtifact
+        const mediaUrl = media.hasMediaReference
           ? api.mediaUrl(m.media_id, m.account_id || state.activeAccountId)
           : "";
         if (media.type === "image") {
-          attachmentHtml = media.isImage
+          attachmentHtml = media.hasMediaReference
             ? `<div class="bubble-attachment" style="padding: 4px 0;"><img src="${escapeAttr(mediaUrl)}" alt="图片" style="max-width: 100%; max-height: 240px; border-radius: var(--r-sm); object-fit: contain;" /></div>`
             : `<div class="bubble-attachment"><span>[图片暂不可预览]</span></div>`;
         } else if (media.type === "sticker") {
-          attachmentHtml = media.isImage
+          attachmentHtml = media.hasMediaReference
             ? `<div class="bubble-attachment" style="padding: 4px 0;"><img src="${escapeAttr(mediaUrl)}" alt="表情" style="max-width: 160px; max-height: 160px; object-fit: contain;" /></div>`
             : `<div class="bubble-attachment"><span>[表情暂不可预览]</span></div>`;
         } else if (media.type === "video") {
-          if (media.isVideo) {
-            attachmentHtml = `<div class="bubble-attachment" style="padding: 4px 0;"><video src="${escapeAttr(mediaUrl)}" controls preload="metadata" style="max-width: 100%; max-height: 280px; border-radius: var(--r-sm);"></video></div>`;
-          } else if (media.isImage) {
-            attachmentHtml = `<div class="bubble-attachment" style="padding: 4px 0;"><img src="${escapeAttr(mediaUrl)}" alt="视频缩略图" style="max-width: 100%; max-height: 240px; border-radius: var(--r-sm); object-fit: contain;" /><div class="caption">[视频]</div></div>`;
+          if (media.hasMediaReference) {
+            if (media.mimeType.startsWith("image/")) {
+              attachmentHtml = `<div class="bubble-attachment" style="padding: 4px 0;"><img src="${escapeAttr(mediaUrl)}" alt="视频缩略图" style="max-width: 100%; max-height: 240px; border-radius: var(--r-sm); object-fit: contain;" /><div class="caption">[视频]</div></div>`;
+            } else {
+              attachmentHtml = `<div class="bubble-attachment" style="padding: 4px 0;"><video src="${escapeAttr(mediaUrl)}" controls preload="metadata" style="max-width: 100%; max-height: 280px; border-radius: var(--r-sm);"></video></div>`;
+            }
           } else {
             attachmentHtml = `<div class="bubble-attachment"><span>[视频暂不可预览]</span></div>`;
           }
         } else if (media.type === "voice") {
-          attachmentHtml = media.hasArtifact
+          attachmentHtml = media.hasMediaReference
             ? `<div class="bubble-attachment"><span>[语音消息]</span><a href="${escapeAttr(mediaUrl)}" target="_blank" rel="noopener">下载原始语音</a></div>`
             : `<div class="bubble-attachment"><span>[语音暂不可播放]</span></div>`;
         } else if (media.type === "file") {
-          const fileLabel = media.filename || m.text || "附件文件";
+          const fileLabel = media.fileLabel || (media.hasResolvedFilename ? media.filename : "文件");
           attachmentHtml = `
             <div class="bubble-attachment">
               ${icon("file", { size: "sm" })}
               <span>${escapeHtml(fileLabel)}</span>
-              ${media.hasArtifact ? `<a href="${escapeAttr(mediaUrl)}" target="_blank" rel="noopener">下载</a>` : ""}
+              ${media.hasMediaReference ? `<a href="${escapeAttr(mediaUrl)}" target="_blank" rel="noopener">下载</a>` : ""}
             </div>
           `;
         }

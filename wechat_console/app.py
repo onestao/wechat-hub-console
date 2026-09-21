@@ -185,22 +185,24 @@ class ConsoleService:
         def loop() -> None:
             while not self._stop.is_set():
                 try:
-                    res = self.sync_events_once(max_pages=5, timeout=20)
+                    res = self.sync_events_once(max_pages=5, timeout=5)
                     if res.get("events", 0) > 0:
                         continue
                 except Exception as exc:  # defensive: loop must not kill Console
                     self.store.log("error", "core-sync", "Core event sync failed", {"error": str(exc)})
                     self._stop.wait(interval)
                 else:
-                    self._stop.wait(0.1)
+                    self._stop.wait(0.05)
 
         self._sync_thread = threading.Thread(target=loop, daemon=True, name="console-core-events")
         self._sync_thread.start()
 
     def stop(self) -> None:
         self._stop.set()
+        with self._event_condition:
+            self._event_condition.notify_all()
         if self._sync_thread and self._sync_thread.is_alive():
-            self._sync_thread.join(timeout=2)
+            self._sync_thread.join(timeout=7.0)
 
     def sync_events_once(self, *, max_pages: int = 3, timeout: int = 0) -> dict[str, Any]:
         if not self._sync_lock.acquire(blocking=False):
@@ -1037,7 +1039,8 @@ def create_handler(service: ConsoleService):
                     since = _query_text(query, "since") or _query_text(query, "after")
                     timeout = _query_int(query, "timeout", 20, 0, 30)
                     events = service.poll_console_events(since=since, timeout=timeout)
-                    _json_response(self, {"events": events, "cursor": service.store.cursor()})
+                    next_cursor = str(events[-1]["cursor"]) if events else (since or service.store.cursor())
+                    _json_response(self, {"events": events, "cursor": next_cursor})
                     return
                 agent_prefix = "/api/agent/"
                 if path.startswith(agent_prefix):

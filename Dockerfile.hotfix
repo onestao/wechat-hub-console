@@ -1,0 +1,9 @@
+FROM ghcr.io/onestao/wechat-hub-console@sha256:0f2a8616fdc15779f93af6937634b399ebdae89b857d872f47a8ff58fb77b3fb
+
+ARG OCI_REVISION=""
+ARG OCI_VERSION=""
+
+LABEL org.opencontainers.image.revision="${OCI_REVISION}"
+LABEL org.opencontainers.image.version="${OCI_VERSION}"
+
+COPY wechat_console /app/wechat_console
